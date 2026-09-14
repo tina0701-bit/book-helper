@@ -2,1204 +2,1133 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>書友結帳小幫手</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
-                        serif: ['Noto Serif TC', 'serif'],
-                    },
-                    colors: {
-                        book: {
-                            50: '#F9F8F6',
-                            100: '#F2EFE9',
-                            200: '#E0D8CB',
-                            300: '#C9BB9F',
-                            600: '#8A7352',
-                            800: '#2C3E50',
-                            900: '#1A252F',
-                        }
-                    }
-                }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>書友結帳小幫手 (雲端即時版)</title>
+<!-- 引入 Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- 引入質感字體 -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600\&family=Noto+Sans+TC:wght@400;500\&family=Noto+Serif+TC:wght@400;500;700;900\&display=swap" rel="stylesheet">
+<!-- 引入 Phosphor 圖示庫 -->
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+<!-- 引入 Firebase SDK (使用 Realtime Database 以獲得最大相容性) -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getDatabase, ref, set, push, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+    // ============================================================
+    // Firebase 雲端共用設定
+    // ============================================================
+    // 這個網站所有使用者都共用同一個房間，因此不要依 hostname 建立不同房間。
+    const ROOM_ID = 'shared_book_room';
+
+    const firebaseConfig = {
+        databaseURL: "https://book-split-helper-default-rtdb.firebaseio.com/"
+    };
+
+    let app;
+    let db;
+    let recordsLoaded = false;
+    let paymentsLoaded = false;
+    let firebaseOnline = false;
+
+    window.recordsRef = null;
+    window.paymentsRef = null;
+    window.recordsData = [];
+    window.paymentsData = [];
+    window.isCloudConnected = false;
+
+    function setCloudStatus(type, message) {
+        const statusEl = document.getElementById('cloud-status');
+        if (!statusEl) return;
+
+        if (type === 'success') {
+            statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
+        } else if (type === 'error') {
+            statusEl.innerHTML = '<i class="ph-fill ph-warning-circle text-red-500 text-lg"></i> <span class="text-red-700 font-medium">雲端連線失敗，請檢查 Firebase</span>';
+        } else {
+            statusEl.innerHTML = '<i class="ph-fill ph-spinner animate-spin text-book-400 text-lg"></i> <span class="text-book-600 font-medium">正在連線雲端...</span>';
+        }
+    }
+
+    function updateCloudState() {
+        window.isCloudConnected = firebaseOnline && recordsLoaded && paymentsLoaded;
+        if (window.isCloudConnected) {
+            setCloudStatus('success', '');
+        } else if (firebaseOnline) {
+            setCloudStatus('loading', '');
+        }
+    }
+
+    try {
+        app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+
+        window.recordsRef = ref(db, 'rooms/' + ROOM_ID + '/records');
+        window.paymentsRef = ref(db, 'rooms/' + ROOM_ID + '/payments');
+
+        // Firebase 網路連線狀態
+        const connectedRef = ref(db, '.info/connected');
+        onValue(connectedRef, (snap) => {
+            firebaseOnline = snap.val() === true;
+            updateCloudState();
+            if (!firebaseOnline) {
+                window.isCloudConnected = false;
+                setCloudStatus('loading', '');
             }
+        }, (error) => {
+            console.error('Firebase 連線狀態讀取失敗:', error);
+            firebaseOnline = false;
+            window.isCloudConnected = false;
+            setCloudStatus('error', '');
+        });
+
+        // 即時監聽：購書紀錄
+        onValue(window.recordsRef, (snapshot) => {
+            window.recordsData = [];
+            snapshot.forEach((childSnapshot) => {
+                window.recordsData.push({ fbId: childSnapshot.key, ...childSnapshot.val() });
+            });
+            window.recordsData.sort((a, b) => (b.id || 0) - (a.id || 0));
+            recordsLoaded = true;
+            updateCloudState();
+            if (window.renderDashboard) {
+                window.renderDashboard();
+                window.renderRecords();
+            }
+        }, (error) => {
+            console.error('讀取購書紀錄失敗:', error);
+            recordsLoaded = false;
+            window.isCloudConnected = false;
+            setCloudStatus('error', '');
+        });
+
+        // 即時監聽：還款紀錄
+        onValue(window.paymentsRef, (snapshot) => {
+            window.paymentsData = [];
+            snapshot.forEach((childSnapshot) => {
+                window.paymentsData.push({ fbId: childSnapshot.key, ...childSnapshot.val() });
+            });
+            window.paymentsData.sort((a, b) => (b.id || 0) - (a.id || 0));
+            paymentsLoaded = true;
+            updateCloudState();
+            if (window.renderDashboard) {
+                window.renderDashboard();
+                const modal = document.getElementById('payment-history-modal');
+                if (modal && !modal.classList.contains('hidden')) window.renderPaymentHistory();
+            }
+        }, (error) => {
+            console.error('讀取還款紀錄失敗:', error);
+            paymentsLoaded = false;
+            window.isCloudConnected = false;
+            setCloudStatus('error', '');
+        });
+
+    } catch (error) {
+        console.error('Firebase 初始化失敗:', error);
+        window.isCloudConnected = false;
+        setCloudStatus('error', '');
+    }
+
+    // ============================================================
+    // Firebase 寫入 API
+    // 注意：雲端不可用時不再偷偷改存 localStorage，避免不同使用者看到不同資料。
+    // ============================================================
+    window.fbAddRecord = async (record) => {
+        if (!window.isCloudConnected) {
+            throw new Error('目前尚未連線到 Firebase，無法新增共享紀錄。');
         }
-    </script>
-    <style>
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .fade-in { animation: fadeIn 0.4s ease-out; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
+        const newRef = push(window.recordsRef);
+        await set(newRef, record);
+    };
+
+    window.fbUpdateRecord = async (fbId, updatedData) => {
+        if (!window.isCloudConnected) {
+            throw new Error('目前尚未連線到 Firebase，無法修改共享紀錄。');
         }
-        button, label { transition: all 0.2s ease; }
-    </style>
+        const recRef = ref(db, 'rooms/' + ROOM_ID + '/records/' + fbId);
+        await update(recRef, updatedData);
+    };
+
+    window.fbDeleteRecord = async (fbId, localId) => {
+        if (!window.isCloudConnected) {
+            throw new Error('目前尚未連線到 Firebase，無法刪除共享紀錄。');
+        }
+        const recRef = ref(db, 'rooms/' + ROOM_ID + '/records/' + fbId);
+        await remove(recRef);
+    };
+
+    window.fbAddPayment = async (payment) => {
+        if (!window.isCloudConnected) {
+            throw new Error('目前尚未連線到 Firebase，無法新增還款紀錄。');
+        }
+        const newRef = push(window.paymentsRef);
+        await set(newRef, payment);
+    };
+
+    window.fbDeletePayment = async (fbId, localId) => {
+        if (!window.isCloudConnected) {
+            throw new Error('目前尚未連線到 Firebase，無法刪除還款紀錄。');
+        }
+        const payRef = ref(db, 'rooms/' + ROOM_ID + '/payments/' + fbId);
+        await remove(payRef);
+    };
+
+    // ============================================================
+    // CSV 匯入：直接覆蓋這個共享房間的雲端資料
+    // ============================================================
+    window.fbImportData = async (newRecords, newPayments) => {
+        if (!window.isCloudConnected) {
+            throw new Error('目前尚未連線到 Firebase，無法匯入共享資料。');
+        }
+
+        const statusEl = document.getElementById('cloud-status');
+        if (statusEl) {
+            statusEl.innerHTML = '<i class="ph-bold ph-spinner animate-spin text-blue-500"></i> 上傳資料中...';
+        }
+
+        const updates = {};
+        const recordsObj = {};
+        const paymentsObj = {};
+
+        newRecords.forEach(rec => {
+            const cleanRec = { ...rec };
+            delete cleanRec.fbId;
+            const newKey = push(ref(db)).key;
+            recordsObj[newKey] = cleanRec;
+        });
+        updates['rooms/' + ROOM_ID + '/records'] = recordsObj;
+
+        newPayments.forEach(pay => {
+            const cleanPay = { ...pay };
+            delete cleanPay.fbId;
+            const newKey = push(ref(db)).key;
+            paymentsObj[newKey] = cleanPay;
+        });
+        updates['rooms/' + ROOM_ID + '/payments'] = paymentsObj;
+
+        await update(ref(db), updates);
+        setCloudStatus('success', '');
+    };
+</script>
+
+<script>
+tailwind.config = {
+theme: {
+extend: {
+fontFamily: { sans: ['Inter', 'Noto Sans TC', 'sans-serif'], serif: ['Noto Serif TC', 'serif'] },
+colors: { book: { 50: '#F9F8F6', 100: '#F2EFE9', 200: '#E0D8CB', 300: '#C9BB9F', 600: '#8A7352', 800: '#2C3E50', 900: '#1A252F' } }
+}
+}
+}
+</script>
+<style>
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.fade-in { animation: fadeIn 0.4s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+button, label { transition: all 0.2s ease; }
+</style>
 </head>
 <body class="bg-book-50 text-book-800 font-sans antialiased min-h-screen flex flex-col">
 
-    <header class="bg-white border-b border-book-200 sticky top-0 z-30 shadow-sm">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
-                <div class="flex items-center gap-3 text-book-900">
-                    <i class="ph-fill ph-books text-2xl text-book-600"></i>
-                    <span class="font-serif font-bold text-xl tracking-wide">書友帳房總覽</span>
-                </div>
-                <button onclick="openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm">
-                    <i class="ph ph-database text-lg"></i> <span class="hidden sm:inline">資料備份/匯入</span>
-                </button>
-            </div>
-            <nav class="flex space-x-8 overflow-x-auto no-scrollbar -mb-px bg-white" aria-label="Tabs">
-                <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-book-900 text-book-900">
-                    <i class="ph ph-squares-four mr-1"></i> 結帳總覽
-                </button>
-                <button onclick="switchTab('records')" id="tab-records" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-book-300 hover:text-book-600 hover:border-book-300">
-                    <i class="ph ph-receipt mr-1"></i> 購書與點數紀錄
-                </button>
-            </nav>
-        </div>
-    </header>
-
-    <main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-        
-        <div id="view-dashboard" class="view-section fade-in block">
-            <div class="bg-book-900 rounded-xl shadow-md p-6 mb-8 border-t-4 border-book-600 overflow-hidden relative">
-                <div class="flex flex-col relative z-10">
-                    <p class="text-book-300 text-sm font-medium mb-1 tracking-widest font-sans">藏書閣共用點數餘額</p>
-                    <div class="flex items-end gap-2 mt-1">
-                        <span class="text-5xl font-serif font-bold text-white leading-none" id="dash-total-points">0.00</span>
-                        <span class="text-book-300 font-medium font-serif mb-1">Pts</span>
-                    </div>
-                </div>
-                <i class="ph-fill ph-book-bookmark absolute -right-6 -bottom-8 text-[10rem] text-white opacity-5 pointer-events-none"></i>
-            </div>
-
-            <div class="mb-8">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
-                    <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
-                        <i class="ph-fill ph-arrows-left-right text-book-600"></i> 轉帳建議
-                    </h2>
-                    <button onclick="openModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-book-50 shadow-sm flex items-center gap-2 transition-colors">
-                        <i class="ph ph-clock-counter-clockwise"></i> 歷史還款紀錄
-                    </button>
-                </div>
-                <div class="bg-white rounded-xl shadow-sm border border-book-200 p-6">
-                    <div id="settlement-results" class="space-y-3 font-sans"></div>
-                </div>
-            </div>
-
-            <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center justify-between">
-                <span>個人帳戶明細</span>
-                <span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊卡片可查看個人紀錄</span>
-            </h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="dashboard-users-grid"></div>
-            
-            <div class="mt-10 mb-4">
-                <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center gap-2">
-                    <i class="ph-fill ph-trophy text-yellow-600"></i> 藏書閣大戶排行榜
-                </h2>
-                <div class="bg-white rounded-xl shadow-sm border border-book-200 p-6">
-                    <div id="leaderboard-container" class="space-y-5 font-sans"></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="view-records" class="view-section fade-in hidden">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
-                    帳目明細表 <span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊列可查看詳細</span>
-                </h2>
-                <button onclick="openModal('transaction-modal')" class="bg-book-900 text-white px-5 py-2.5 rounded-md text-sm font-medium hover:bg-book-800 shadow-sm flex items-center gap-2 transition-colors">
-                    <i class="ph ph-plus-circle text-lg"></i> 新增購書/點數
-                </button>
-            </div>
-
-            <div class="bg-white rounded-xl shadow-sm border border-book-200 p-4 mb-4 flex flex-wrap items-end gap-3">
-                <div>
-                    <label class="block text-xs font-medium text-book-800 mb-1">開始日期</label>
-                    <input type="date" id="filter-start" class="w-full border border-book-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-book-600 outline-none">
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-book-800 mb-1">結束日期</label>
-                    <input type="date" id="filter-end" class="w-full border border-book-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-book-600 outline-none">
-                </div>
-                <div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-                    <button onclick="applyFilter()" class="flex-1 sm:flex-none bg-book-100 hover:bg-book-200 text-book-800 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-book-300">
-                        <i class="ph ph-magnifying-glass inline-block mr-1"></i>查詢
-                    </button>
-                    <button onclick="clearFilter()" class="flex-1 sm:flex-none bg-white hover:bg-gray-50 text-gray-500 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-gray-200">
-                        清除
-                    </button>
-                </div>
-            </div>
-            
-            <div class="bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden">
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-book-100">
-                        <thead class="bg-book-50">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">日期</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">項目說明</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">代墊人</th>
-                                <th class="px-4 py-3 text-right text-xs font-medium text-book-800 uppercase tracking-wider">總價/折抵</th>
-                                <th class="px-4 py-3 text-right text-xs font-medium text-book-800 uppercase tracking-wider">獲得點數</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">分攤名單</th>
-                                <th class="px-4 py-3 text-right text-xs font-medium text-book-800 uppercase tracking-wider">每人負擔</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-book-800 uppercase tracking-wider">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="records-table-body" class="bg-white divide-y divide-book-100 font-sans">
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-    </main>
-
-    <!-- Modal: 新增/編輯購書紀錄 -->
-    <div id="transaction-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-book-200 my-8 relative z-50">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10">
-                <h3 id="modal-title" class="text-lg font-serif font-bold text-book-900">新增帳目紀錄</h3>
-                <button onclick="closeModal('transaction-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
-            </div>
-            <form id="add-transaction-form" class="p-6 space-y-5">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-book-800 mb-1">日期</label>
-                        <input type="date" id="trans-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-book-800 mb-1">誰刷卡代墊的？</label>
-                        <select id="trans-payer" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white">
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-book-800 mb-1">項目名稱 (書名 / 活動名稱)</label>
-                    <input type="text" id="trans-title" placeholder="例如：晚安,布布 1 或 9月儲值回饋" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans">
-                </div>
-                <div class="p-4 bg-book-100/50 rounded-lg border border-book-200 space-y-4">
-                    <h4 class="text-sm font-bold text-book-900 font-serif border-b border-book-200 pb-2">金額與點數細節</h4>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-xs font-medium text-book-800 mb-1">總價 (應付現金)</label>
-                            <input type="number" id="trans-price" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-book-800 mb-1">使用點數折抵 (-)</label>
-                            <input type="number" id="trans-points-used" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0">
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-book-800 mb-1">獲得點數 (+)</label>
-                        <input type="number" id="trans-points-earned" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-sans" value="0">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-book-800 mb-2">誰有參與這筆帳？</label>
-                    <div class="grid grid-cols-2 gap-3" id="trans-buyers-checkboxes"></div>
-                </div>
-                <div class="pt-2 flex gap-3">
-                    <button type="button" onclick="closeModal('transaction-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50 transition-colors">取消</button>
-                    <button type="submit" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal: 新增還款紀錄 -->
-    <div id="settle-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border border-book-200">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
-                <h3 class="text-lg font-serif font-bold text-book-900">紀錄還款金額</h3>
-                <button onclick="closeModal('settle-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
-            </div>
-            <form id="add-payment-form" class="p-6 space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-book-800 mb-1">還款日期</label>
-                    <input type="date" id="payment-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-white">
-                </div>
-                <div class="flex items-center gap-2">
-                    <div class="flex-1">
-                        <label class="block text-xs font-medium text-book-800 mb-1">付款人 (還錢者)</label>
-                        <select id="payment-from" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select>
-                    </div>
-                    <i class="ph-bold ph-arrow-right text-book-400 mt-5"></i>
-                    <div class="flex-1">
-                        <label class="block text-xs font-medium text-book-800 mb-1">收款人 (收錢者)</label>
-                        <select id="payment-to" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-book-800 mb-1">實際還款/預繳金額</label>
-                    <div class="relative">
-                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-book-500 font-mono">$</span>
-                        <input type="number" id="payment-amount" step="0.01" required min="0.01" class="w-full border border-book-200 rounded-md pl-7 pr-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-mono font-bold text-lg text-book-900">
-                    </div>
-                    <p class="text-xs text-book-500 mt-2 leading-relaxed">可填寫部分金額或全額。<br>若<span class="text-emerald-600 font-medium">多繳(溢繳)</span>，系統會自動記錄為預繳金，於未來購書時自動扣除。</p>
-                </div>
-                <div class="pt-4 flex gap-3">
-                    <button type="button" onclick="closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button>
-                    <button type="submit" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal: 全域歷史還款紀錄清單 -->
-    <div id="payment-history-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-book-200 flex flex-col max-h-[80vh]">
-            <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-center sticky top-0">
-                <h3 class="text-xl font-serif font-bold text-book-900">全域歷史還款紀錄</h3>
-                <button onclick="closeModal('payment-history-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
-            </div>
-            <div class="flex-1 overflow-y-auto p-0 no-scrollbar">
-                <table class="min-w-full divide-y divide-book-100">
-                    <thead class="bg-book-50/50 sticky top-0">
-                        <tr>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-book-500">日期</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-book-500">還款流向</th>
-                            <th class="px-4 py-3 text-right text-xs font-medium text-book-500">金額</th>
-                            <th class="px-4 py-3 text-center text-xs font-medium text-book-500">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="payment-history-body" class="divide-y divide-book-100 text-sm">
-                    </tbody>
-                </table>
-            </div>
-            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
-                <button onclick="closeModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100">關閉</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: 單筆明細詳細檢視 -->
-    <div id="tx-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-book-200 my-8 flex flex-col">
-            <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-start">
-                <div>
-                    <span id="tx-detail-date" class="text-xs text-book-500 font-medium mb-1 block"></span>
-                    <h3 id="tx-detail-title" class="text-xl font-serif font-bold text-book-900"></h3>
-                </div>
-                <button onclick="closeModal('tx-detail-modal')" class="text-book-400 hover:text-book-800 mt-1"><i class="ph ph-x text-xl"></i></button>
-            </div>
-            <div class="p-6 space-y-6 flex-1">
-                <div class="grid grid-cols-2 gap-4 text-sm">
-                    <div class="bg-book-50 p-3 rounded-lg border border-book-100">
-                        <span class="block text-book-500 mb-1">代墊人</span>
-                        <span id="tx-detail-payer" class="font-bold text-book-900"></span>
-                    </div>
-                    <div class="bg-book-50 p-3 rounded-lg border border-book-100">
-                        <span class="block text-book-500 mb-1">參與人數</span>
-                        <span id="tx-detail-buyer-count" class="font-bold text-book-900"></span>
-                    </div>
-                </div>
-                <div class="space-y-2 border-t border-book-100 pt-4 text-sm">
-                    <div class="flex justify-between">
-                        <span class="text-book-600">總價</span>
-                        <span id="tx-detail-price" class="font-mono font-bold text-book-900"></span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-book-600">使用點數折抵</span>
-                        <span id="tx-detail-points-used" class="font-mono text-red-500"></span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-book-600">獲得新點數</span>
-                        <span id="tx-detail-points-earned" class="font-mono text-emerald-600 font-bold"></span>
-                    </div>
-                    <div class="h-px bg-book-200 my-2"></div>
-                    <div class="flex justify-between text-base">
-                        <span class="font-bold text-book-900">實際需付現金</span>
-                        <span id="tx-detail-actual-cash" class="font-mono font-bold text-book-900"></span>
-                    </div>
-                </div>
-                
-                <div>
-                    <h4 class="text-sm font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-2">參與者分攤明細</h4>
-                    <div id="tx-detail-buyers-list" class="space-y-2"></div>
-                </div>
-            </div>
-            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
-                <button onclick="closeModal('tx-detail-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100 transition-colors">關閉</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: 個人專屬帳戶明細 -->
-    <div id="user-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden border border-book-200 my-8 flex flex-col h-[85vh]">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10 shadow-sm">
-                <div class="flex items-center gap-3">
-                    <div id="user-detail-avatar" class="w-10 h-10 rounded-full bg-book-900 text-white flex items-center justify-center font-serif font-bold text-lg shadow-inner"></div>
-                    <h3 class="text-xl font-serif font-bold text-book-900"><span id="user-detail-name"></span> 的專屬帳房</h3>
-                </div>
-                <button onclick="closeModal('user-detail-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
-            </div>
-            
-            <div class="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
-                        <span class="block text-xs text-book-500 mb-1">應付帳單總額</span>
-                        <span id="user-detail-expense" class="text-xl font-mono font-bold text-red-600"></span>
-                    </div>
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
-                        <span class="block text-xs text-book-500 mb-1">代墊支出總額</span>
-                        <span id="user-detail-paid" class="text-xl font-mono font-bold text-blue-600"></span>
-                    </div>
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
-                        <span class="block text-xs text-book-500 mb-1">目前淨結餘</span>
-                        <div id="user-detail-balance" class="text-lg font-bold"></div>
-                    </div>
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
-                        <span class="block text-xs text-book-500 mb-1">貢獻/獲得點數</span>
-                        <span id="user-detail-points" class="text-xl font-mono font-bold text-emerald-600"></span>
-                    </div>
-                </div>
-
-                <div>
-                    <h4 class="text-lg font-serif font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-3">帳戶異動明細</h4>
-                    <div class="bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden">
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-book-100">
-                                <thead class="bg-book-50">
-                                    <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-book-800">日期 / 項目</th>
-                                        <th class="px-4 py-3 text-center text-xs font-medium text-book-800">角色</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="自己實際上應該負擔的成本">帳單分攤</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="實際掏出或收回的現金">實際金流</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="user-detail-records-body" class="bg-white divide-y divide-book-100 text-sm">
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: 資料備份與匯入 -->
-    <div id="backup-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-book-200">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
-                <h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2">
-                    <i class="ph ph-database text-book-600"></i> 資料備份與匯入設定
-                </h3>
-                <button onclick="closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
-            </div>
-            <div class="p-6 space-y-6">
-                
-                <div class="bg-emerald-50 p-5 rounded-lg border border-emerald-200">
-                    <h4 class="font-bold text-emerald-900 mb-2 flex items-center gap-2">
-                        <i class="ph-fill ph-file-csv text-xl"></i> 📂 批次匯入 Book Walker 專用 CSV
-                    </h4>
-                    <p class="text-sm text-emerald-700 mb-4">系統會自動抓取您上傳的 CSV 中的「書名」、「活動價」以及「誰有買」。<br><strong class="text-emerald-900">✨ 新功能：若該行只有點數沒有金額，系統會自動判斷為純點數且不設定代墊人！</strong></p>
-                    
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label class="block text-xs font-medium text-emerald-800 mb-1">這批訂單的預設購買日期</label>
-                            <input type="date" id="csv-import-date" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-emerald-800 mb-1">預設代墊人 (有花錢才會算)</label>
-                            <select id="csv-import-payer" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white">
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-3">
-                        <input type="file" id="csv-upload-input" accept=".csv" class="block w-full text-sm text-emerald-800 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer border border-emerald-200 rounded-md bg-white">
-                    </div>
-                </div>
-
-                <hr class="border-book-200">
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="bg-white p-4 rounded-lg border border-book-200 flex flex-col justify-between">
-                        <div>
-                            <h4 class="font-bold text-book-900 mb-2">📥 匯出目前資料</h4>
-                            <p class="text-xs text-book-600 mb-4">將目前的所有的購書與還款紀錄下載為系統專用備份檔案 (.json)。</p>
-                        </div>
-                        <button onclick="exportData()" class="w-full bg-book-900 text-white px-4 py-2 rounded-md font-medium text-sm hover:bg-book-800 transition-colors flex items-center justify-center gap-2">
-                            <i class="ph ph-download-simple"></i> 下載備份檔
-                        </button>
-                    </div>
-                    <div class="bg-white p-4 rounded-lg border border-book-200 flex flex-col justify-between">
-                        <div>
-                            <h4 class="font-bold text-book-900 mb-2 text-red-700">📤 匯入系統備份檔</h4>
-                            <p class="text-xs text-book-600 mb-2">貼上之前的 .json 備份內容。<strong class="text-red-600">警告：會覆蓋現有資料！</strong></p>
-                            <textarea id="import-textarea" rows="2" class="w-full border border-book-200 rounded-md p-2 text-xs font-mono focus:ring-2 focus:ring-book-600 outline-none resize-none bg-book-50 mb-2" placeholder="貼上 JSON 內容..."></textarea>
-                        </div>
-                        <button onclick="importData()" class="w-full bg-white border-2 border-book-900 text-book-900 px-4 py-1.5 rounded-md font-medium text-sm hover:bg-book-50 transition-colors flex items-center justify-center gap-2">
-                            確認覆蓋匯入
-                        </button>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // 固定使用者名單
-        const users = ['心綺', '心薇', '欣璇', '阿澧'];
-        
-        let recordsData = JSON.parse(localStorage.getItem('book_split_records_v3')) || [];
-        let paymentsData = JSON.parse(localStorage.getItem('book_split_payments_v1')) || [];
-        
-        let currentEditingId = null;
-
-        function init() {
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('trans-date').value = today;
-            document.getElementById('payment-date').value = today;
-            document.getElementById('csv-import-date').value = today;
-
-            const userOptions = users.map(user => `<option value="${user}">${user}</option>`).join('');
-            document.getElementById('trans-payer').innerHTML = userOptions;
-            document.getElementById('payment-from').innerHTML = userOptions;
-            document.getElementById('payment-to').innerHTML = userOptions;
-            document.getElementById('csv-import-payer').innerHTML = userOptions;
-
-            const checkboxContainer = document.getElementById('trans-buyers-checkboxes');
-            checkboxContainer.innerHTML = users.map(user => `
-                <label class="flex items-center p-3 bg-white border border-book-200 rounded-md cursor-pointer hover:bg-book-50 hover:border-book-300 transition-colors">
-                    <input type="checkbox" value="${user}" class="trans-buyer-cb w-4 h-4 text-book-900 border-book-300 rounded focus:ring-book-900">
-                    <span class="ml-2 text-sm text-book-900 font-medium">${user}</span>
-                </label>
-            `).join('');
-
-            updateUI();
-            setupCSVUploader();
-        }
-
-        function switchTab(tabId) {
-            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => {
-                el.classList.remove('border-book-900', 'text-book-900');
-                el.classList.add('border-transparent', 'text-book-300');
-            });
-            
-            document.getElementById(`view-${tabId}`).classList.remove('hidden');
-            const activeBtn = document.getElementById(`tab-${tabId}`);
-            activeBtn.classList.remove('border-transparent', 'text-book-300');
-            activeBtn.classList.add('border-book-900', 'text-book-900');
-        }
-
-        function openModal(modalId, isEdit = false) { 
-            document.getElementById(modalId).classList.remove('hidden'); 
-            if (modalId === 'transaction-modal' && !isEdit) {
-                currentEditingId = null;
-                document.getElementById('modal-title').innerText = '新增帳目紀錄';
-                document.getElementById('add-transaction-form').reset();
-                document.getElementById('trans-date').value = new Date().toISOString().split('T')[0];
-            }
-            if (modalId === 'payment-history-modal') {
-                renderPaymentHistory();
-            }
-            if (modalId === 'backup-modal') {
-                document.getElementById('import-textarea').value = ''; 
-                document.getElementById('csv-upload-input').value = '';
-            }
-        }
-
-        function closeModal(modalId) {
-             document.getElementById(modalId).classList.add('hidden');
-             if (modalId === 'transaction-modal') {
-                 document.getElementById('add-transaction-form').reset();
-                 currentEditingId = null; 
-             }
-             if (modalId === 'settle-modal') {
-                 document.getElementById('add-payment-form').reset();
-             }
-        }
-
-        function updateUI() {
-            localStorage.setItem('book_split_records_v3', JSON.stringify(recordsData));
-            localStorage.setItem('book_split_payments_v1', JSON.stringify(paymentsData));
-            renderDashboard();
-            renderRecords();
-            if(!document.getElementById('payment-history-modal').classList.contains('hidden')){
-                renderPaymentHistory();
-            }
-        }
-
-        // --- CSV 解析器 (升級版：判斷金錢與點數的獨立性) ---
-        function setupCSVUploader() {
-            const fileInput = document.getElementById('csv-upload-input');
-            fileInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    const buffer = evt.target.result;
-                    let text = '';
-                    try {
-                        let decoder = new TextDecoder('utf-8', { fatal: true });
-                        text = decoder.decode(buffer);
-                    } catch (err) {
-                        console.log("UTF-8 decoding failed, falling back to Big5");
-                        let decoder = new TextDecoder('big5');
-                        text = decoder.decode(buffer);
-                    }
-                    
-                    if(text.includes('')) {
-                        let decoder = new TextDecoder('big5');
-                        text = decoder.decode(buffer);
-                    }
-
-                    parseAndImportCSV(text);
-                    fileInput.value = ''; 
-                };
-                reader.readAsArrayBuffer(file);
-            });
-        }
-
-        function parseCSVText(text) {
-            const lines = [];
-            let currentLine = [];
-            let currentCell = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < text.length; i++) {
-                const char = text[i];
-                if (inQuotes) {
-                    if (char === '"') {
-                        if (i + 1 < text.length && text[i + 1] === '"') {
-                            currentCell += '"'; 
-                            i++;
-                        } else {
-                            inQuotes = false;
-                        }
-                    } else {
-                        currentCell += char;
-                    }
-                } else {
-                    if (char === '"') {
-                        inQuotes = true;
-                    } else if (char === ',') {
-                        currentLine.push(currentCell.trim());
-                        currentCell = '';
-                    } else if (char === '\n' || char === '\r') {
-                        if (currentCell !== '' || currentLine.length > 0) {
-                            currentLine.push(currentCell.trim());
-                            lines.push(currentLine);
-                            currentLine = [];
-                            currentCell = '';
-                        }
-                        if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
-                            i++; 
-                        }
-                    } else {
-                        currentCell += char;
-                    }
-                }
-            }
-            if (currentCell !== '' || currentLine.length > 0) {
-                currentLine.push(currentCell.trim());
-                lines.push(currentLine);
-            }
-            return lines;
-        }
-
-        function parseAndImportCSV(text) {
-            const lines = parseCSVText(text);
-            const batchDate = document.getElementById('csv-import-date').value;
-            const batchPayer = document.getElementById('csv-import-payer').value;
-            
-            let newRecords = [];
-            let importedCount = 0;
-
-            for (let i = 0; i < lines.length; i++) {
-                const row = lines[i];
-                if (row.length < 6) continue;
-
-                const title = row[0];
-                if (!title || title.includes('書名') || title.includes('總計') || title.includes('平均') || title.includes('點數') || title.includes('總價')) continue;
-
-                // 判斷該行是「花錢買書」還是「純點數紀錄」
-                // 預設第 2 欄是活動價(金額)，如果該欄位是空值或NaN，就當作0
-                let priceRaw = row[1].trim();
-                let price = priceRaw === '' ? 0 : parseFloat(priceRaw);
-                if (isNaN(price) || price < 0) price = 0; 
-                
-                // 讀取每人的欄位來判斷是否參與 (欄位裡有大於0的數字就代表有參與)
-                let buyers = [];
-                let pointsEarned = 0; // 若為純點數，我們從參與者的欄位數字來推算總點數
-                
-                const val2 = parseFloat(row[2]);
-                const val3 = parseFloat(row[3]);
-                const val4 = parseFloat(row[4]);
-                const val5 = parseFloat(row[5]);
-
-                if (!isNaN(val2) && val2 > 0) { buyers.push('心綺'); if(price===0) pointsEarned += val2; }
-                if (!isNaN(val3) && val3 > 0) { buyers.push('心薇'); if(price===0) pointsEarned += val3; }
-                if (!isNaN(val4) && val4 > 0) { buyers.push('欣璇'); if(price===0) pointsEarned += val4; }
-                if (!isNaN(val5) && val5 > 0) { buyers.push('阿澧'); if(price===0) pointsEarned += val5; }
-
-                if (buyers.length > 0) {
-                    let finalPayer = price > 0 ? batchPayer : null; // 【關鍵修改】：若是純點數 (price=0)，代墊人為 null
-                    let perPersonCash = price > 0 ? (price / buyers.length) : 0;
-                    let perPersonPointsEarned = price === 0 ? (pointsEarned / buyers.length) : 0;
-                    
-                    // 若原始資料有給特定的點數總額也可以讀，但通常 CSV 分開寫，這裡直接依邏輯計算
-                    newRecords.push({
-                        id: Date.now() + importedCount, 
-                        date: batchDate,
-                        title: title,
-                        payer: finalPayer,
-                        price: price,
-                        pointsUsed: 0,
-                        pointsEarned: pointsEarned, 
-                        buyers: buyers,
-                        perPersonCash: perPersonCash,
-                        perPersonPointsEarned: perPersonPointsEarned
-                    });
-                    importedCount++;
-                }
-            }
-
-            if (importedCount > 0) {
-                if(confirm(`成功解析出 ${importedCount} 筆紀錄！\n\n系統已自動判斷「花費」與「純點數」的差別。若為純點數紀錄，將不會有代墊人。\n\n請問確定要匯入嗎？`)) {
-                    recordsData = recordsData.concat(newRecords);
-                    updateUI();
-                    closeModal('backup-modal');
-                }
-            } else {
-                alert('解析失敗 😢 \n無法從這個 CSV 檔案中找到有效的購書紀錄。\n請確認格式是否為：「書名, 金額, 心綺數值, 心薇數值...」');
-            }
-        }
-
-        // --- 資料匯出/還原功能 ---
-        function exportData() {
-            const data = { version: "1.0", recordsData, paymentsData };
-            const dataStr = JSON.stringify(data, null, 2);
-            const blob = new Blob([dataStr], {type: "application/json"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `書友帳房備份_${new Date().toISOString().split('T')[0]}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-
-        function importData() {
-            const jsonStr = document.getElementById('import-textarea').value.trim();
-            if (!jsonStr) { alert('請先貼上資料！'); return; }
-            try {
-                const data = JSON.parse(jsonStr);
-                if (data.recordsData || data.paymentsData) {
-                    if(confirm('警告：這將會覆蓋您目前的所有的資料！確定要繼續嗎？')) {
-                        recordsData = data.recordsData || [];
-                        paymentsData = data.paymentsData || [];
-                        updateUI();
-                        closeModal('backup-modal');
-                        alert('資料還原成功！系統已更新。');
-                    }
-                } else {
-                    alert('格式不正確，這不是有效的 JSON 備份檔。');
-                }
-            } catch (e) {
-                alert('解析失敗，請確認貼上的是正確的系統備份格式。');
-            }
-        }
-
-        // --- 購書紀錄 CRUD ---
-        function deleteRecord(id) {
-            if(confirm('確定要刪除這筆紀錄嗎？這將會影響結算結果。')) {
-                recordsData = recordsData.filter(record => record.id !== id);
-                updateUI();
-            }
-        }
-
-        function editRecord(id) {
-            const record = recordsData.find(r => r.id === id);
-            if (!record) return;
-
-            currentEditingId = id;
-            openModal('transaction-modal', true);
-            document.getElementById('modal-title').innerText = '編輯帳目紀錄';
-
-            document.getElementById('trans-date').value = record.date;
-            document.getElementById('trans-payer').value = record.payer || users[0];
-            document.getElementById('trans-title').value = record.title;
-            document.getElementById('trans-price').value = record.price;
-            document.getElementById('trans-points-used').value = record.pointsUsed;
-            document.getElementById('trans-points-earned').value = record.pointsEarned;
-
-            document.querySelectorAll('.trans-buyer-cb').forEach(cb => {
-                cb.checked = record.buyers.includes(cb.value);
-            });
-        }
-
-        // --- 還款紀錄 CRUD ---
-        function openSettleModal(fromUser, toUser, amount) {
-            document.getElementById('payment-date').value = new Date().toISOString().split('T')[0];
-            document.getElementById('payment-from').value = fromUser;
-            document.getElementById('payment-to').value = toUser;
-            document.getElementById('payment-amount').value = amount.toFixed(2);
-            openModal('settle-modal');
-        }
-
-        document.getElementById('add-payment-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const date = document.getElementById('payment-date').value;
-            const from = document.getElementById('payment-from').value;
-            const to = document.getElementById('payment-to').value;
-            const amount = parseFloat(document.getElementById('payment-amount').value);
-
-            if (from === to) { alert('付款人與收款人不能是同一人！'); return; }
-            if (amount <= 0) { alert('金額必須大於0！'); return; }
-
-            paymentsData.push({ id: Date.now(), date, from, to, amount });
-            updateUI();
-            closeModal('settle-modal');
-        });
-
-        function deletePayment(id) {
-            if(confirm('確定要刪除這筆還款紀錄嗎？餘額將會重新計算。')) {
-                paymentsData = paymentsData.filter(p => p.id !== id);
-                updateUI();
-            }
-        }
-
-        function renderPaymentHistory() {
-            const tbody = document.getElementById('payment-history-body');
-            if (paymentsData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何還款紀錄。</td></tr>`;
-                return;
-            }
-            
-            const sortedPayments = [...paymentsData].sort((a,b) => new Date(b.date) - new Date(a.date));
-            
-            tbody.innerHTML = sortedPayments.map(p => `
-                <tr class="hover:bg-book-50/50">
-                    <td class="px-4 py-3 text-book-600">${p.date}</td>
-                    <td class="px-4 py-3">
-                        <div class="flex items-center gap-2">
-                            <span class="text-book-900">${p.from}</span>
-                            <i class="ph ph-arrow-right text-emerald-600"></i>
-                            <span class="text-book-900">${p.to}</span>
-                        </div>
-                    </td>
-                    <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${p.amount.toFixed(2)}</td>
-                    <td class="px-4 py-3 text-center">
-                        <button onclick="deletePayment(${p.id})" class="text-book-400 hover:text-red-500 p-1" title="刪除還款紀錄">
-                            <i class="ph-fill ph-trash text-lg"></i>
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        // --- 檢視單筆明細 ---
-        function viewTransactionDetail(id) {
-            const record = recordsData.find(r => r.id === id);
-            if (!record) return;
-
-            document.getElementById('tx-detail-date').innerText = record.date;
-            document.getElementById('tx-detail-title').innerText = record.title;
-            document.getElementById('tx-detail-payer').innerText = record.payer ? record.payer : '無 (純點數)';
-            document.getElementById('tx-detail-buyer-count').innerText = `${record.buyers.length} 人`;
-            
-            document.getElementById('tx-detail-price').innerText = `$${record.price.toFixed(2)}`;
-            document.getElementById('tx-detail-points-used').innerText = record.pointsUsed > 0 ? `- ${record.pointsUsed.toFixed(2)}` : '0';
-            document.getElementById('tx-detail-points-earned').innerText = record.pointsEarned > 0 ? `+ ${record.pointsEarned.toFixed(2)}` : '0';
-            
-            const actualCash = Math.max(0, record.price - record.pointsUsed);
-            document.getElementById('tx-detail-actual-cash').innerText = `$${actualCash.toFixed(2)}`;
-
-            const buyersListHtml = record.buyers.map(b => `
-                <div class="flex justify-between items-center bg-white p-3 border border-book-100 rounded-lg">
-                    <span class="font-bold text-book-800">${b}</span>
-                    <div class="text-right">
-                        <div class="font-mono font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>
-                        ${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-600">+ ${record.perPersonPointsEarned.toFixed(2)} Pts</div>` : ''}
-                    </div>
-                </div>
-            `).join('');
-
-            document.getElementById('tx-detail-buyers-list').innerHTML = record.buyers.length > 0 ? buyersListHtml : '<p class="text-book-400 text-sm italic">無參與者</p>';
-            openModal('tx-detail-modal');
-        }
-
-        // --- 檢視個人專屬明細 ---
-        function viewUserDetail(userName) {
-            let expense = 0, paid = 0, points = 0, settledSent = 0, settledRecv = 0;
-            let userHistory = []; 
-            
-            recordsData.forEach(r => {
-                const isPayer = r.payer === userName;
-                const isBuyer = r.buyers && r.buyers.includes(userName);
-                
-                if (isPayer) paid += (r.price || 0);
-                if (isBuyer) {
-                    expense += (r.perPersonCash || 0);
-                    points += (r.perPersonPointsEarned || 0);
-                }
-
-                if (isPayer || isBuyer) {
-                    userHistory.push({
-                        type: 'book',
-                        date: r.date,
-                        timestamp: new Date(r.date).getTime() + r.id, 
-                        title: r.title,
-                        isPayer, isBuyer,
-                        myExpense: isBuyer ? r.perPersonCash : 0,
-                        myPaid: isPayer ? r.price : 0,
-                        myPoints: isBuyer ? r.perPersonPointsEarned : 0
-                    });
-                }
-            });
-
-            paymentsData.forEach(p => {
-                const isSender = p.from === userName;
-                const isReceiver = p.to === userName;
-                
-                if (isSender) settledSent += p.amount;
-                if (isReceiver) settledRecv += p.amount;
-
-                if (isSender || isReceiver) {
-                    userHistory.push({
-                        type: 'payment',
-                        date: p.date,
-                        timestamp: new Date(p.date).getTime() + p.id,
-                        title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
-                        isSender, isReceiver,
-                        amount: p.amount
-                    });
-                }
-            });
-
-            const balance = (paid + settledSent) - (expense + settledRecv);
-
-            document.getElementById('user-detail-name').innerText = userName;
-            document.getElementById('user-detail-avatar').innerText = userName.charAt(0);
-            
-            document.getElementById('user-detail-expense').innerText = `$${expense.toFixed(2)}`;
-            document.getElementById('user-detail-paid').innerText = `$${paid.toFixed(2)}`;
-            document.getElementById('user-detail-points').innerText = `+${points.toFixed(2)}`;
-            
-            const balanceEl = document.getElementById('user-detail-balance');
-            if (balance > 0.01) {
-                balanceEl.innerHTML = `<span class="text-emerald-600">應收回(或預繳) $${balance.toFixed(2)}</span>`;
-            } else if (balance < -0.01) {
-                balanceEl.innerHTML = `<span class="text-red-600">需支付 $${Math.abs(balance).toFixed(2)}</span>`;
-            } else {
-                balanceEl.innerHTML = `<span class="text-book-600">已結清 ($0)</span>`;
-            }
-
-            userHistory.sort((a,b) => b.timestamp - a.timestamp);
-            const tbody = document.getElementById('user-detail-records-body');
-            
-            if (userHistory.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何帳戶異動紀錄。</td></tr>`;
-            } else {
-                tbody.innerHTML = userHistory.map(item => {
-                    let roleTags = '';
-                    let expenseCol = '-';
-                    let cashFlowCol = '-';
-
-                    if (item.type === 'book') {
-                        if (item.isPayer && item.myPaid > 0) roleTags += `<span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] mr-1">代墊</span>`;
-                        if (item.isBuyer) roleTags += `<span class="bg-book-200 text-book-800 px-1.5 py-0.5 rounded text-[10px]">分攤</span>`;
-                        
-                        if (item.myExpense > 0) expenseCol = `<span class="text-book-800 font-bold">$${item.myExpense.toFixed(2)}</span>`;
-                        
-                        if (item.myPaid > 0) {
-                            cashFlowCol = `<span class="text-blue-600 font-bold">掏出 $${item.myPaid.toFixed(2)}</span>`;
-                        }
-                        if (item.myPoints > 0) {
-                            expenseCol += `<br><span class="text-[10px] text-emerald-600 font-normal">+${item.myPoints.toFixed(2)} 點</span>`;
-                        }
-
-                    } else if (item.type === 'payment') {
-                        if (item.isSender) {
-                            roleTags = `<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">支付還款</span>`;
-                            cashFlowCol = `<span class="text-red-600 font-bold">掏出 $${item.amount.toFixed(2)}</span>`;
-                        } else {
-                            roleTags = `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[10px]">收到還款</span>`;
-                            cashFlowCol = `<span class="text-emerald-600 font-bold">收回 $${item.amount.toFixed(2)}</span>`;
-                        }
-                    }
-
-                    return `
-                    <tr class="hover:bg-book-50/50 transition-colors">
-                        <td class="px-4 py-3">
-                            <div class="text-xs text-book-500">${item.date}</div>
-                            <div class="font-bold text-book-900">${item.title}</div>
-                        </td>
-                        <td class="px-4 py-3 text-center whitespace-nowrap">${roleTags}</td>
-                        <td class="px-4 py-3 text-right font-mono text-sm leading-tight">${expenseCol}</td>
-                        <td class="px-4 py-3 text-right font-mono text-sm">${cashFlowCol}</td>
-                    </tr>
-                    `;
-                }).join('');
-            }
-            openModal('user-detail-modal');
-        }
-
-        // 查詢功能
-        function applyFilter() { renderRecords(); }
-        function clearFilter() {
-            document.getElementById('filter-start').value = '';
-            document.getElementById('filter-end').value = '';
-            renderRecords();
-        }
-
-        // 渲染主畫面
-        function renderDashboard() {
-            let totalPoints = 0;
-            let accounts = {};
-            users.forEach(u => accounts[u] = { expense: 0, paid: 0, points: 0, settledSent: 0, settledRecv: 0 });
-
-            recordsData.forEach(record => {
-                totalPoints += (record.pointsEarned || 0);
-                totalPoints -= (record.pointsUsed || 0);
-                if (record.payer && accounts[record.payer]) {
-                    accounts[record.payer].paid += (record.price || 0);
-                }
-                if (record.buyers && record.buyers.length > 0) {
-                    record.buyers.forEach(buyer => {
-                        if (accounts[buyer]) {
-                            accounts[buyer].expense += (record.perPersonCash || 0);
-                            accounts[buyer].points += (record.perPersonPointsEarned || 0);
-                        }
-                    });
-                }
-            });
-            document.getElementById('dash-total-points').innerText = totalPoints.toFixed(2);
-
-            paymentsData.forEach(payment => {
-                if (accounts[payment.from]) accounts[payment.from].settledSent += payment.amount;
-                if (accounts[payment.to]) accounts[payment.to].settledRecv += payment.amount;
-            });
-
-            let balances = {};
-            users.forEach(u => balances[u] = (accounts[u].paid + accounts[u].settledSent) - (accounts[u].expense + accounts[u].settledRecv));
-
-            let debtors = [], creditors = [];
-            for (let user in balances) {
-                if (balances[user] < -0.01) debtors.push({ name: user, amount: -balances[user] });
-                else if (balances[user] > 0.01) creditors.push({ name: user, amount: balances[user] });
-            }
-            debtors.sort((a, b) => b.amount - a.amount);
-            creditors.sort((a, b) => b.amount - a.amount);
-
-            let transfers = [];
-            let dIndex = 0, cIndex = 0;
-            while (dIndex < debtors.length && cIndex < creditors.length) {
-                let debtor = debtors[dIndex];
-                let creditor = creditors[cIndex];
-                let amountToTransfer = Math.min(debtor.amount, creditor.amount);
-                
-                if (amountToTransfer > 0.01) {
-                    transfers.push({ from: debtor.name, to: creditor.name, amount: amountToTransfer });
-                }
-                debtor.amount -= amountToTransfer;
-                creditor.amount -= amountToTransfer;
-                if (debtor.amount < 0.01) dIndex++;
-                if (creditor.amount < 0.01) cIndex++;
-            }
-
-            const settlementContainer = document.getElementById('settlement-results');
-            if (transfers.length === 0) {
-                settlementContainer.innerHTML = `<p class="text-book-600 text-center py-4 flex items-center justify-center gap-2"><i class="ph ph-check-circle text-emerald-600 text-xl"></i> 目前所有帳目已結清，無須轉帳！</p>`;
-            } else {
-                settlementContainer.innerHTML = transfers.map(t => `
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-book-50 rounded-lg border border-book-100 gap-3">
-                        <div class="flex items-center gap-3">
-                            <span class="text-book-900">${t.from}</span>
-                            <i class="ph ph-arrow-right text-book-300"></i>
-                            <span class="text-book-900">${t.to}</span>
-                            <span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">
-                                應付 $${t.amount.toFixed(2)}
-                            </span>
-                        </div>
-                        <button onclick="openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
-                            <i class="ph ph-money"></i> 紀錄部分/全額還款
-                        </button>
-                    </div>
-                `).join('');
-            }
-
-            const grid = document.getElementById('dashboard-users-grid');
-            grid.innerHTML = users.map(user => {
-                const acc = accounts[user];
-                const bal = balances[user];
-                let statusHtml = '';
-                if (bal > 0.01) {
-                    statusHtml = `<span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">應收回 $${bal.toFixed(2)}</span>`;
-                } else if (bal < -0.01) {
-                    statusHtml = `<span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100">需支付 $${Math.abs(bal).toFixed(2)}</span>`;
-                } else {
-                    statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
-                }
-
-                return `
-                <div onclick="viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
-                    <div class="p-4 border-b border-book-100 flex items-center justify-between bg-book-50/50 group-hover:bg-book-100/50 transition-colors">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">
-                                ${user.charAt(0)}
-                            </div>
-                            <h3 class="font-serif font-bold text-book-900 text-lg">${user}</h3>
-                        </div>
-                        ${statusHtml}
-                    </div>
-                    <div class="p-4 flex flex-col gap-3 text-sm">
-                        <div class="flex justify-between items-center text-book-800">
-                            <span>共消費</span>
-                            <span class="font-mono font-bold">$${acc.expense.toFixed(2)}</span>
-                        </div>
-                        <div class="flex justify-between items-center text-book-800">
-                            <span>已代墊</span>
-                            <span class="font-mono font-bold">$${acc.paid.toFixed(2)}</span>
-                        </div>
-                        <div class="h-px w-full bg-book-100 my-1"></div>
-                        <div class="flex justify-between items-center">
-                            <span class="text-book-600 font-medium">個人獲得點數</span>
-                            <span class="font-mono font-bold text-emerald-600">+${acc.points.toFixed(2)} Pts</span>
-                        </div>
-                    </div>
-                </div>
-            `}).join('');
-
-            const leaderboardContainer = document.getElementById('leaderboard-container');
-            const sortedUsers = [...users].sort((a, b) => accounts[b].expense - accounts[a].expense);
-            const maxExpense = Math.max(...sortedUsers.map(u => accounts[u].expense), 1);
-
-            if (maxExpense === 1 && sortedUsers[0].expense === 0) {
-                leaderboardContainer.innerHTML = `<p class="text-book-400 text-center py-4 font-serif italic">目前大家的心如止水，尚未有任何購書紀錄。</p>`;
-            } else {
-                leaderboardContainer.innerHTML = sortedUsers.map((user, index) => {
-                    const exp = accounts[user].expense;
-                    const percentage = (exp / maxExpense) * 100;
-                    let rankIcon = index === 0 ? '<i class="ph-fill ph-medal text-yellow-500 text-3xl drop-shadow-sm"></i>' : 
-                                   index === 1 ? '<i class="ph-fill ph-medal text-slate-400 text-3xl drop-shadow-sm"></i>' : 
-                                   index === 2 ? '<i class="ph-fill ph-medal text-amber-700 text-3xl drop-shadow-sm"></i>' : 
-                                   `<span class="w-8 text-center font-bold text-book-400 font-serif text-lg">${index + 1}</span>`;
-
-                    return `
-                    <div class="flex items-center gap-3 sm:gap-4 group">
-                        <div class="flex-shrink-0 w-10 flex justify-center">${rankIcon}</div>
-                        <div class="font-serif font-bold text-book-900 w-12 text-lg">${user}</div>
-                        <div class="flex-grow h-4 bg-book-100 rounded-full overflow-hidden shadow-inner">
-                            <div class="h-full bg-book-600 rounded-full transition-all duration-1000 ease-out relative overflow-hidden" style="width: ${percentage}%">
-                                <div class="absolute inset-0 bg-white/20 w-full h-full transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-                            </div>
-                        </div>
-                        <div class="w-24 text-right font-mono font-bold text-book-900 text-lg">$${exp.toFixed(2)}</div>
-                    </div>
-                    `;
-                }).join('');
-            }
-        }
-
-        function renderRecords() {
-            const tbody = document.getElementById('records-table-body');
-            const startDate = document.getElementById('filter-start').value;
-            const endDate = document.getElementById('filter-end').value;
-
-            let filteredRecords = [...recordsData];
-            if (startDate) filteredRecords = filteredRecords.filter(r => r.date >= startDate);
-            if (endDate) filteredRecords = filteredRecords.filter(r => r.date <= endDate);
-
-            if (filteredRecords.length === 0) {
-                const message = recordsData.length === 0 ? "尚無任何紀錄，點擊右上角新增吧！" : "此區間查無紀錄。";
-                tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-12 text-center text-book-300 font-serif italic">${message}</td></tr>`;
-                return;
-            }
-
-            const sortedRecords = filteredRecords.sort((a,b) => new Date(b.date) - new Date(a.date));
-
-            tbody.innerHTML = sortedRecords.map(record => {
-                const isOnlyPoints = record.price === 0 && record.pointsEarned > 0;
-                return `
-                <tr onclick="viewTransactionDetail(${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-book-600">${record.date}</td>
-                    <td class="px-4 py-3 text-sm font-serif font-bold text-book-900">
-                        ${record.title}
-                        ${isOnlyPoints ? `<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>` : ''}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">
-                        ${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${record.payer}</span>` : '-'}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono">
-                        <div class="font-bold text-book-900">$${record.price.toFixed(2)}</div>
-                        ${record.pointsUsed > 0 ? `<div class="text-xs text-red-500 mt-0.5">- ${record.pointsUsed.toFixed(2)} 點</div>` : ''}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-emerald-600 font-bold">
-                        ${record.pointsEarned > 0 ? `+${record.pointsEarned.toFixed(2)}` : '-'}
-                    </td>
-                    <td class="px-4 py-3 text-sm text-book-800">
-                        <div class="flex flex-wrap gap-1">
-                            ${record.buyers.length > 0 ? record.buyers.map(b => `<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">${b}</span>`).join('') : '-'}
-                        </div>
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono">
-                        <div class="font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>
-                        ${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${record.perPersonPointsEarned.toFixed(2)} 點</div>` : ''}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-center">
-                        <button onclick="event.stopPropagation(); editRecord(${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1" title="編輯此紀錄">
-                            <i class="ph-fill ph-pencil-simple text-lg"></i>
-                        </button>
-                        <button onclick="event.stopPropagation(); deleteRecord(${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1" title="刪除此紀錄">
-                            <i class="ph-fill ph-trash text-lg"></i>
-                        </button>
-                    </td>
-                </tr>
-            `}).join('');
-        }
-
-        document.getElementById('add-transaction-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const date = document.getElementById('trans-date').value;
-            const payer = document.getElementById('trans-payer').value;
-            const title = document.getElementById('trans-title').value;
-            const price = parseFloat(document.getElementById('trans-price').value) || 0;
-            const pointsUsed = parseFloat(document.getElementById('trans-points-used').value) || 0;
-            const pointsEarned = parseFloat(document.getElementById('trans-points-earned').value) || 0;
-            const checkedBoxes = document.querySelectorAll('.trans-buyer-cb:checked');
-            const buyers = Array.from(checkedBoxes).map(cb => cb.value);
-
-            if (price > 0 && buyers.length === 0) { alert('有消費金額產生，請至少勾選一位參與分攤的人員！'); return; }
-            if (pointsEarned > 0 && buyers.length === 0) { alert('有點數產生，請至少勾選一位參與分配的人員！'); return; }
-            if (pointsUsed > price && price > 0) { alert('折抵的點數不能大於總價喔！'); return; }
-
-            let actualCashCost = Math.max(0, price - pointsUsed);
-            let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
-            let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
-
-            const newRecord = {
-                id: currentEditingId ? currentEditingId : Date.now(),
-                date, title, payer: (price > 0) ? payer : null, price, pointsUsed, pointsEarned, buyers, perPersonCash, perPersonPointsEarned
-            };
-
-            if (currentEditingId) {
-                const index = recordsData.findIndex(r => r.id === currentEditingId);
-                if (index !== -1) recordsData[index] = newRecord;
-            } else {
-                recordsData.push(newRecord);
-            }
-
-            updateUI();
-            closeModal('transaction-modal');
-        });
-
-        init();
-    </script>
+<header class="bg-white border-b border-book-200 sticky top-0 z-30 shadow-sm">
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+<div class="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:h-16 gap-3">
+<div class="flex items-center gap-3 text-book-900 flex-wrap">
+<i class="ph-fill ph-books text-2xl text-book-600"></i>
+<span class="font-serif font-bold text-xl tracking-wide">書友帳房總覽</span>
+
+<!-- 雲端狀態指示器 (由 Firebase 控制) -->
+<span id="cloud-status" class="text-xs ml-2 bg-book-50 px-3 py-1.5 rounded-full border border-book-200 flex items-center gap-1.5 shadow-inner">
+<i class="ph ph-spinner animate-spin text-book-400"></i> 正在連線資料庫...
+</span>
+</div>
+<button onclick="openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm self-start sm:self-auto">
+<i class="ph ph-database text-lg"></i> <span class="hidden sm:inline">資料批次匯入</span>
+</button>
+</div>
+<!-- 頁籤切換按鈕 -->
+<nav class="flex space-x-8 overflow-x-auto no-scrollbar -mb-px bg-white" aria-label="Tabs">
+<button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-book-900 text-book-900">
+<i class="ph ph-squares-four mr-1"></i> 結帳總覽
+</button>
+<button onclick="switchTab('records')" id="tab-records" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-book-300 hover:text-book-600 hover:border-book-300">
+<i class="ph ph-receipt mr-1"></i> 購書與點數紀錄
+</button>
+</nav>
+</div>
+</header>
+
+<main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+
+<!-- 頁籤 1: 結帳總覽 Dashboard -->
+<div id="view-dashboard" class="view-section fade-in block">
+
+<!-- 共用點數卡片 -->
+<div class="bg-book-900 rounded-xl shadow-md p-6 mb-8 border-t-4 border-book-600 overflow-hidden relative">
+<div class="flex flex-col relative z-10">
+<p class="text-book-300 text-sm font-medium mb-1 tracking-widest font-sans">藏書閣共用點數餘額</p>
+<div class="flex items-end gap-2 mt-1">
+<span class="text-5xl font-serif font-bold text-white leading-none" id="dash-total-points">0.00</span>
+<span class="text-book-300 font-medium font-serif mb-1">Pts</span>
+</div>
+</div>
+<i class="ph-fill ph-book-bookmark absolute -right-6 -bottom-8 text-[10rem] text-white opacity-5 pointer-events-none"></i>
+</div>
+
+<!-- 自動結算 -->
+<div class="mb-8">
+<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+<h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
+<i class="ph-fill ph-arrows-left-right text-book-600"></i> 轉帳建議
+</h2>
+<button onclick="openModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-book-50 shadow-sm flex items-center gap-2 transition-colors">
+<i class="ph ph-clock-counter-clockwise"></i> 歷史還款紀錄
+</button>
+</div>
+<div class="bg-white rounded-xl shadow-sm border border-book-200 p-6">
+<div id="settlement-results" class="space-y-3 font-sans"></div>
+</div>
+</div>
+
+<!-- 個人帳戶總覽 -->
+<h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center justify-between">
+<span>個人帳戶明細</span>
+<span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊卡片可查看個人紀錄</span>
+</h2>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="dashboard-users-grid"></div>
+
+<div class="mt-10 mb-4">
+<h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center gap-2">
+<i class="ph-fill ph-trophy text-yellow-600"></i> 藏書閣大戶排行榜
+</h2>
+<div class="bg-white rounded-xl shadow-sm border border-book-200 p-6">
+<div id="leaderboard-container" class="space-y-5 font-sans"></div>
+</div>
+</div>
+</div>
+
+<!-- 頁籤 2: 購書與點數紀錄 -->
+<div id="view-records" class="view-section fade-in hidden">
+<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+<h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
+帳目明細表 <span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊列可查看詳細</span>
+</h2>
+<button onclick="openModal('transaction-modal')" class="bg-book-900 text-white px-5 py-2.5 rounded-md text-sm font-medium hover:bg-book-800 shadow-sm flex items-center gap-2 transition-colors">
+<i class="ph ph-plus-circle text-lg"></i> 新增購書/點數
+</button>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-book-200 p-4 mb-4 flex flex-wrap items-end gap-3">
+<div>
+<label class="block text-xs font-medium text-book-800 mb-1">開始日期</label>
+<input type="date" id="filter-start" class="w-full border border-book-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-book-600 outline-none">
+</div>
+<div>
+<label class="block text-xs font-medium text-book-800 mb-1">結束日期</label>
+<input type="date" id="filter-end" class="w-full border border-book-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-book-600 outline-none">
+</div>
+<div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+<button onclick="applyFilter()" class="flex-1 sm:flex-none bg-book-100 hover:bg-book-200 text-book-800 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-book-300">
+<i class="ph ph-magnifying-glass inline-block mr-1"></i>查詢
+</button>
+<button onclick="clearFilter()" class="flex-1 sm:flex-none bg-white hover:bg-gray-50 text-gray-500 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-gray-200">
+清除
+</button>
+</div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden">
+<div class="overflow-x-auto">
+<table class="min-w-full divide-y divide-book-100">
+<thead class="bg-book-50">
+<tr>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">日期</th>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">項目說明</th>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">代墊人</th>
+<th class="px-4 py-3 text-right text-xs font-medium text-book-800 uppercase tracking-wider">總價/折抵</th>
+<th class="px-4 py-3 text-right text-xs font-medium text-book-800 uppercase tracking-wider">獲得點數</th>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-800 uppercase tracking-wider">分攤名單</th>
+<th class="px-4 py-3 text-right text-xs font-medium text-book-800 uppercase tracking-wider">每人負擔</th>
+<th class="px-4 py-3 text-center text-xs font-medium text-book-800 uppercase tracking-wider">操作</th>
+</tr>
+</thead>
+<tbody id="records-table-body" class="bg-white divide-y divide-book-100 font-sans">
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+
+<!-- Modal: 新增/編輯購書紀錄 -->
+<div id="transaction-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
+<div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-book-200 my-8 relative z-50">
+<div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10">
+<h3 id="modal-title" class="text-lg font-serif font-bold text-book-900">新增帳目紀錄</h3>
+<button onclick="closeModal('transaction-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+</div>
+<form id="add-transaction-form" class="p-6 space-y-5">
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<div>
+<label class="block text-sm font-medium text-book-800 mb-1">日期</label>
+<input type="date" id="trans-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white">
+</div>
+<div>
+<label class="block text-sm font-medium text-book-800 mb-1">誰刷卡代墊的？</label>
+<select id="trans-payer" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white">
+</select>
+</div>
+</div>
+<div>
+<label class="block text-sm font-medium text-book-800 mb-1">項目名稱 (書名 / 活動名稱)</label>
+<input type="text" id="trans-title" placeholder="例如：晚安,布布 1 或 9月儲值回饋" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans">
+</div>
+<div class="p-4 bg-book-100/50 rounded-lg border border-book-200 space-y-4">
+<h4 class="text-sm font-bold text-book-900 font-serif border-b border-book-200 pb-2">金額與點數細節</h4>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<div>
+<label class="block text-xs font-medium text-book-800 mb-1">總價 (應付現金)</label>
+<input type="number" id="trans-price" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0">
+</div>
+<div>
+<label class="block text-xs font-medium text-book-800 mb-1">使用點數折抵 (-)</label>
+<input type="number" id="trans-points-used" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0">
+</div>
+</div>
+<div>
+<label class="block text-xs font-medium text-book-800 mb-1">獲得點數 (+)</label>
+<input type="number" id="trans-points-earned" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-sans" value="0">
+</div>
+</div>
+<div>
+<label class="block text-sm font-medium text-book-800 mb-2">誰有參與這筆帳？</label>
+<div class="grid grid-cols-2 gap-3" id="trans-buyers-checkboxes"></div>
+</div>
+<div class="pt-2 flex gap-3">
+<button type="button" onclick="closeModal('transaction-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50 transition-colors">取消</button>
+<button type="submit" id="save-trans-btn" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button>
+</div>
+</form>
+</div>
+</div>
+
+<!-- Modal: 新增還款紀錄 -->
+<div id="settle-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4 overflow-y-auto">
+<div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border border-book-200">
+<div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
+<h3 class="text-lg font-serif font-bold text-book-900">紀錄還款金額</h3>
+<button onclick="closeModal('settle-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+</div>
+<form id="add-payment-form" class="p-6 space-y-4">
+<div>
+<label class="block text-sm font-medium text-book-800 mb-1">還款日期</label>
+<input type="date" id="payment-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-white">
+</div>
+<div class="flex items-center gap-2">
+<div class="flex-1">
+<label class="block text-xs font-medium text-book-800 mb-1">付款人 (還錢者)</label>
+<select id="payment-from" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select>
+</div>
+<i class="ph-bold ph-arrow-right text-book-400 mt-5"></i>
+<div class="flex-1">
+<label class="block text-xs font-medium text-book-800 mb-1">收款人 (收錢者)</label>
+<select id="payment-to" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select>
+</div>
+</div>
+<div>
+<label class="block text-sm font-medium text-book-800 mb-1">實際還款/預繳金額</label>
+<div class="relative">
+<span class="absolute inset-y-0 left-0 flex items-center pl-3 text-book-500 font-mono">$</span>
+<input type="number" id="payment-amount" step="0.01" required min="0.01" class="w-full border border-book-200 rounded-md pl-7 pr-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-mono font-bold text-lg text-book-900">
+</div>
+<p class="text-xs text-book-500 mt-2 leading-relaxed">可填寫部分金額或全額。若<span class="text-emerald-600 font-medium">多繳(溢繳)</span>，系統會自動記錄為預繳金，於未來購書時自動扣除。</p>
+</div>
+<div class="pt-4 flex gap-3">
+<button type="button" onclick="closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button>
+<button type="submit" id="save-pay-btn" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button>
+</div>
+</form>
+</div>
+</div>
+
+<!-- Modal: 全域歷史還款紀錄清單 -->
+<div id="payment-history-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
+<div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-book-200 flex flex-col max-h-[80vh]">
+<div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-center sticky top-0">
+<h3 class="text-xl font-serif font-bold text-book-900">全域歷史還款紀錄</h3>
+<button onclick="closeModal('payment-history-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+</div>
+<div class="flex-1 overflow-y-auto p-0 no-scrollbar">
+<table class="min-w-full divide-y divide-book-100">
+<thead class="bg-book-50/50 sticky top-0">
+<tr>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-500">日期</th>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-500">還款流向</th>
+<th class="px-4 py-3 text-right text-xs font-medium text-book-500">金額</th>
+<th class="px-4 py-3 text-center text-xs font-medium text-book-500">操作</th>
+</tr>
+</thead>
+<tbody id="payment-history-body" class="divide-y divide-book-100 text-sm"></tbody>
+</table>
+</div>
+<div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
+<button onclick="closeModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100">關閉</button>
+</div>
+</div>
+</div>
+
+<!-- Modal: 單筆明細詳細檢視 -->
+<div id="tx-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
+<div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-book-200 my-8 flex flex-col">
+<div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-start">
+<div>
+<span id="tx-detail-date" class="text-xs text-book-500 font-medium mb-1 block"></span>
+<h3 id="tx-detail-title" class="text-xl font-serif font-bold text-book-900"></h3>
+</div>
+<button onclick="closeModal('tx-detail-modal')" class="text-book-400 hover:text-book-800 mt-1"><i class="ph ph-x text-xl"></i></button>
+</div>
+<div class="p-6 space-y-6 flex-1">
+<div class="grid grid-cols-2 gap-4 text-sm">
+<div class="bg-book-50 p-3 rounded-lg border border-book-100">
+<span class="block text-book-500 mb-1">代墊人</span>
+<span id="tx-detail-payer" class="font-bold text-book-900"></span>
+</div>
+<div class="bg-book-50 p-3 rounded-lg border border-book-100">
+<span class="block text-book-500 mb-1">參與人數</span>
+<span id="tx-detail-buyer-count" class="font-bold text-book-900"></span>
+</div>
+</div>
+<div class="space-y-2 border-t border-book-100 pt-4 text-sm">
+<div class="flex justify-between">
+<span class="text-book-600">總價</span>
+<span id="tx-detail-price" class="font-mono font-bold text-book-900"></span>
+</div>
+<div class="flex justify-between">
+<span class="text-book-600">使用點數折抵</span>
+<span id="tx-detail-points-used" class="font-mono text-red-500"></span>
+</div>
+<div class="flex justify-between">
+<span class="text-book-600">獲得新點數</span>
+<span id="tx-detail-points-earned" class="font-mono text-emerald-600 font-bold"></span>
+</div>
+<div class="h-px bg-book-200 my-2"></div>
+<div class="flex justify-between text-base">
+<span class="font-bold text-book-900">實際需付現金</span>
+<span id="tx-detail-actual-cash" class="font-mono font-bold text-book-900"></span>
+</div>
+</div>
+
+<div>
+<h4 class="text-sm font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-2">參與者分攤明細</h4>
+<div id="tx-detail-buyers-list" class="space-y-2"></div>
+</div>
+</div>
+<div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
+<button onclick="closeModal('tx-detail-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100 transition-colors">關閉</button>
+</div>
+</div>
+</div>
+
+<!-- Modal: 個人專屬帳戶明細 -->
+<div id="user-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
+<div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden border border-book-200 my-8 flex flex-col h-[85vh]">
+<div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+<div class="flex items-center gap-3">
+<div id="user-detail-avatar" class="w-10 h-10 rounded-full bg-book-900 text-white flex items-center justify-center font-serif font-bold text-lg shadow-inner"></div>
+<h3 class="text-xl font-serif font-bold text-book-900"><span id="user-detail-name"></span> 的專屬帳房</h3>
+</div>
+<button onclick="closeModal('user-detail-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+</div>
+
+<div class="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+<span class="block text-xs text-book-500 mb-1">應付帳單總額</span>
+<span id="user-detail-expense" class="text-xl font-mono font-bold text-red-600"></span>
+</div>
+<div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+<span class="block text-xs text-book-500 mb-1">代墊支出總額</span>
+<span id="user-detail-paid" class="text-xl font-mono font-bold text-blue-600"></span>
+</div>
+<div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+<span class="block text-xs text-book-500 mb-1">目前淨結餘</span>
+<div id="user-detail-balance" class="text-lg font-bold"></div>
+</div>
+<div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+<span class="block text-xs text-book-500 mb-1">貢獻/獲得點數</span>
+<span id="user-detail-points" class="text-xl font-mono font-bold text-emerald-600"></span>
+</div>
+</div>
+
+<div>
+<h4 class="text-lg font-serif font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-3">帳戶異動明細</h4>
+<div class="bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden">
+<div class="overflow-x-auto">
+<table class="min-w-full divide-y divide-book-100">
+<thead class="bg-book-50">
+<tr>
+<th class="px-4 py-3 text-left text-xs font-medium text-book-800">日期 / 項目</th>
+<th class="px-4 py-3 text-center text-xs font-medium text-book-800">角色</th>
+<th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="自己實際上應該負擔的成本">帳單分攤</th>
+<th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="實際掏出或收回的現金">實際金流</th>
+</tr>
+</thead>
+<tbody id="user-detail-records-body" class="bg-white divide-y divide-book-100 text-sm">
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Modal: 資料匯入 (CSV) -->
+<div id="backup-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
+<div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-book-200">
+<div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
+<h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2"><i class="ph ph-database text-book-600"></i> 資料批次匯入設定</h3>
+<button onclick="closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+</div>
+<div class="p-6 space-y-6">
+<div class="bg-emerald-50 p-5 rounded-lg border border-emerald-200">
+<h4 class="font-bold text-emerald-900 mb-2 flex items-center gap-2"><i class="ph-fill ph-file-csv text-xl"></i> 📂 批次匯入 CSV</h4>
+<p class="text-sm text-emerald-700 mb-4">系統會自動抓取您上傳的 CSV 中的「書名」、「活動價」以及「誰有買」。</p>
+<div class="grid grid-cols-2 gap-4 mb-4">
+<div>
+<label class="block text-xs font-medium text-emerald-800 mb-1">這批訂單的預設購買日期</label>
+<input type="date" id="csv-import-date" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white">
+</div>
+<div>
+<label class="block text-xs font-medium text-emerald-800 mb-1">預設代墊人</label>
+<select id="csv-import-payer" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white"></select>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<input type="file" id="csv-upload-input" accept=".csv" class="block w-full text-sm text-emerald-800 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer border border-emerald-200 rounded-md bg-white">
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- 腳本邏輯區 -->
+<script>
+const users = ['心綺', '心薇', '欣璇', '阿澧'];
+
+function initUI() {
+const today = new Date().toISOString().split('T')[0];
+document.getElementById('trans-date').value = today;
+document.getElementById('payment-date').value = today;
+document.getElementById('csv-import-date').value = today;
+
+const userOptions = users.map(user => `<option value="${user}">${user}</option>`).join('');
+document.getElementById('trans-payer').innerHTML = userOptions;
+document.getElementById('payment-from').innerHTML = userOptions;
+document.getElementById('payment-to').innerHTML = userOptions;
+document.getElementById('csv-import-payer').innerHTML = userOptions;
+
+const checkboxContainer = document.getElementById('trans-buyers-checkboxes');
+checkboxContainer.innerHTML = users.map(user => `
+<label class="flex items-center p-3 bg-white border border-book-200 rounded-md cursor-pointer hover:bg-book-50 hover:border-book-300 transition-colors">
+<input type="checkbox" value="${user}" class="trans-buyer-cb w-4 h-4 text-book-900 border-book-300 rounded focus:ring-book-900">
+<span class="ml-2 text-sm text-book-900 font-medium">${user}</span>
+</label>
+`).join('');
+
+setupCSVUploader();
+}
+window.addEventListener('DOMContentLoaded', initUI);
+
+function switchTab(tabId) {
+document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+document.querySelectorAll('.tab-btn').forEach(el => {
+el.classList.remove('border-book-900', 'text-book-900');
+el.classList.add('border-transparent', 'text-book-300');
+});
+document.getElementById(`view-${tabId}`).classList.remove('hidden');
+const activeBtn = document.getElementById(`tab-${tabId}`);
+activeBtn.classList.remove('border-transparent', 'text-book-300');
+activeBtn.classList.add('border-book-900', 'text-book-900');
+}
+
+window.openModal = function(modalId, isEdit = false) {
+document.getElementById(modalId).classList.remove('hidden');
+if (modalId === 'transaction-modal' && !isEdit) {
+window.currentEditingId = null;
+document.getElementById('modal-title').innerText = '新增帳目紀錄';
+document.getElementById('add-transaction-form').reset();
+document.getElementById('trans-date').value = new Date().toISOString().split('T')[0];
+}
+if (modalId === 'payment-history-modal') window.renderPaymentHistory();
+if (modalId === 'backup-modal') document.getElementById('csv-upload-input').value = '';
+}
+
+window.closeModal = function(modalId) {
+document.getElementById(modalId).classList.add('hidden');
+if (modalId === 'transaction-modal') { document.getElementById('add-transaction-form').reset(); window.currentEditingId = null; }
+if (modalId === 'settle-modal') document.getElementById('add-payment-form').reset();
+}
+
+// --- CSV 解析與雲端寫入 ---
+function setupCSVUploader() {
+const fileInput = document.getElementById('csv-upload-input');
+fileInput.addEventListener('change', function(e) {
+const file = e.target.files[0];
+if (!file) return;
+const reader = new FileReader();
+reader.onload = function(evt) {
+const buffer = evt.target.result;
+let text = '';
+try { let decoder = new TextDecoder('utf-8', { fatal: true }); text = decoder.decode(buffer); }
+catch (err) { let decoder = new TextDecoder('big5'); text = decoder.decode(buffer); }
+if(text.includes('')) { let decoder = new TextDecoder('big5'); text = decoder.decode(buffer); }
+parseAndImportCSV(text);
+fileInput.value = '';
+};
+reader.readAsArrayBuffer(file);
+});
+}
+
+function parseCSVText(text) {
+const lines = []; let currentLine = [], currentCell = '', inQuotes = false;
+for (let i = 0; i < text.length; i++) {
+const char = text[i];
+if (inQuotes) {
+if (char === '"') {
+if (i + 1 < text.length && text[i + 1] === '"') { currentCell += '"'; i++; }
+else { inQuotes = false; }
+} else { currentCell += char; }
+} else {
+if (char === '"') { inQuotes = true; }
+else if (char === ',') { currentLine.push(currentCell.trim()); currentCell = ''; }
+else if (char === '\n' || char === '\r') {
+if (currentCell !== '' || currentLine.length > 0) {
+currentLine.push(currentCell.trim()); lines.push(currentLine); currentLine = []; currentCell = '';
+}
+if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') { i++; }
+} else { currentCell += char; }
+}
+}
+if (currentCell !== '' || currentLine.length > 0) { currentLine.push(currentCell.trim()); lines.push(currentLine); }
+return lines;
+}
+
+async function parseAndImportCSV(text) {
+const lines = parseCSVText(text);
+const batchDate = document.getElementById('csv-import-date').value;
+const batchPayer = document.getElementById('csv-import-payer').value;
+let newRecords = []; let importedCount = 0;
+
+for (let i = 0; i < lines.length; i++) {
+const row = lines[i];
+if (row.length < 6) continue;
+const title = row[0];
+if (!title || title.includes('書名') || title.includes('總計') || title.includes('平均') || title.includes('點數') || title.includes('總價')) continue;
+
+let priceRaw = row[1].trim();
+let price = priceRaw === '' ? 0 : parseFloat(priceRaw);
+if (isNaN(price) || price < 0) price = 0;
+
+let buyers = []; let pointsEarned = 0;
+const val2 = parseFloat(row[2]), val3 = parseFloat(row[3]), val4 = parseFloat(row[4]), val5 = parseFloat(row[5]);
+if (!isNaN(val2) && val2 > 0) { buyers.push('心綺'); if(price===0) pointsEarned += val2; }
+if (!isNaN(val3) && val3 > 0) { buyers.push('心薇'); if(price===0) pointsEarned += val3; }
+if (!isNaN(val4) && val4 > 0) { buyers.push('欣璇'); if(price===0) pointsEarned += val4; }
+if (!isNaN(val5) && val5 > 0) { buyers.push('阿澧'); if(price===0) pointsEarned += val5; }
+
+if (buyers.length > 0) {
+let finalPayer = price > 0 ? batchPayer : null;
+let perPersonCash = price > 0 ? (price / buyers.length) : 0;
+let perPersonPointsEarned = price === 0 ? (pointsEarned / buyers.length) : 0;
+
+newRecords.push({
+id: Date.now() + importedCount,
+date: batchDate, title: title, payer: finalPayer, price: price,
+pointsUsed: 0, pointsEarned: pointsEarned, buyers: buyers,
+perPersonCash: perPersonCash, perPersonPointsEarned: perPersonPointsEarned
+});
+importedCount++;
+}
+}
+
+if (importedCount > 0) {
+if(confirm(`成功解析出 ${importedCount} 筆紀錄！\n若已開啟雲端共用，匯入後將直接發布至雲端。\n確定要匯入嗎？`)) {
+await window.fbImportData(newRecords, []);
+closeModal('backup-modal');
+alert("匯入完成！");
+}
+} else { alert('無法從檔案中找到有效的購書紀錄。'); }
+}
+
+window.editRecord = function(fbId, localId) {
+const idToSearch = window.isCloudConnected ? fbId : localId;
+const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
+if (!record) return;
+
+window.currentEditingId = idToSearch;
+window.openModal('transaction-modal', true);
+document.getElementById('modal-title').innerText = '編輯帳目紀錄';
+document.getElementById('trans-date').value = record.date;
+document.getElementById('trans-payer').value = record.payer || users[0];
+document.getElementById('trans-title').value = record.title;
+document.getElementById('trans-price').value = record.price;
+document.getElementById('trans-points-used').value = record.pointsUsed;
+document.getElementById('trans-points-earned').value = record.pointsEarned;
+
+document.querySelectorAll('.trans-buyer-cb').forEach(cb => { cb.checked = record.buyers.includes(cb.value); });
+}
+
+document.getElementById('add-transaction-form').addEventListener('submit', async function(e) {
+e.preventDefault();
+const btn = document.getElementById('save-trans-btn');
+btn.disabled = true; btn.innerText = "處理中...";
+
+const date = document.getElementById('trans-date').value;
+const payer = document.getElementById('trans-payer').value;
+const title = document.getElementById('trans-title').value;
+const price = parseFloat(document.getElementById('trans-price').value) || 0;
+const pointsUsed = parseFloat(document.getElementById('trans-points-used').value) || 0;
+const pointsEarned = parseFloat(document.getElementById('trans-points-earned').value) || 0;
+const checkedBoxes = document.querySelectorAll('.trans-buyer-cb:checked');
+const buyers = Array.from(checkedBoxes).map(cb => cb.value);
+
+if (price > 0 && buyers.length === 0) { alert('請至少勾選一位參與分攤的人員！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+if (pointsEarned > 0 && buyers.length === 0) { alert('請至少勾選一位參與分配的人員！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+if (pointsUsed > price && price > 0) { alert('折抵不能大於總價！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+
+let actualCashCost = Math.max(0, price - pointsUsed);
+let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
+let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
+
+const newRecord = {
+id: window.currentEditingId && !window.isCloudConnected ? window.currentEditingId : Date.now(),
+date, title, payer: (price > 0) ? payer : null, price, pointsUsed, pointsEarned, buyers, perPersonCash, perPersonPointsEarned
+};
+
+try {
+if (window.currentEditingId) {
+await window.fbUpdateRecord(window.currentEditingId, newRecord);
+} else {
+await window.fbAddRecord(newRecord);
+}
+closeModal('transaction-modal');
+} catch (err) { alert("操作失敗，請重試"); console.error(err); }
+btn.disabled = false; btn.innerText = "儲存紀錄";
+});
+
+window.openSettleModal = function(fromUser, toUser, amount) {
+document.getElementById('payment-date').value = new Date().toISOString().split('T')[0];
+document.getElementById('payment-from').value = fromUser;
+document.getElementById('payment-to').value = toUser;
+document.getElementById('payment-amount').value = amount.toFixed(2);
+window.openModal('settle-modal');
+}
+
+document.getElementById('add-payment-form').addEventListener('submit', async function(e) {
+e.preventDefault();
+const btn = document.getElementById('save-pay-btn');
+btn.disabled = true; btn.innerText = "處理中...";
+
+const date = document.getElementById('payment-date').value;
+const from = document.getElementById('payment-from').value;
+const to = document.getElementById('payment-to').value;
+const amount = parseFloat(document.getElementById('payment-amount').value);
+
+if (from === to) { alert('付款人與收款人不能是同一人！'); btn.disabled=false; btn.innerText="確認標記"; return; }
+if (amount <= 0) { alert('金額必須大於0！'); btn.disabled=false; btn.innerText="確認標記"; return; }
+
+try {
+await window.fbAddPayment({ id: Date.now(), date, from, to, amount });
+closeModal('settle-modal');
+} catch (err) { alert("標記失敗"); }
+btn.disabled = false; btn.innerText="確認標記";
+});
+
+window.renderPaymentHistory = function() {
+const tbody = document.getElementById('payment-history-body');
+if (window.paymentsData.length === 0) {
+tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何還款紀錄。</td></tr>`;
+return;
+}
+const sortedPayments = [...window.paymentsData].sort((a,b) => new Date(b.date) - new Date(a.date));
+tbody.innerHTML = sortedPayments.map(p => `
+<tr class="hover:bg-book-50/50">
+<td class="px-4 py-3 text-book-600">${p.date}</td>
+<td class="px-4 py-3"><div class="flex items-center gap-2"><span class="text-book-900">${p.from}</span><i class="ph ph-arrow-right text-emerald-600"></i><span class="text-book-900">${p.to}</span></div></td>
+<td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${p.amount.toFixed(2)}</td>
+<td class="px-4 py-3 text-center"><button onclick="window.fbDeletePayment('${p.fbId}', ${p.id})" class="text-book-400 hover:text-red-500 p-1"><i class="ph-fill ph-trash text-lg"></i></button></td>
+</tr>
+`).join('');
+}
+
+window.viewTransactionDetail = function(fbId, localId) {
+const idToSearch = window.isCloudConnected ? fbId : localId;
+const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
+if (!record) return;
+
+document.getElementById('tx-detail-date').innerText = record.date;
+document.getElementById('tx-detail-title').innerText = record.title;
+document.getElementById('tx-detail-payer').innerText = record.payer ? record.payer : '無 (純點數)';
+document.getElementById('tx-detail-buyer-count').innerText = `${record.buyers.length} 人`;
+document.getElementById('tx-detail-price').innerText = `$${record.price.toFixed(2)}`;
+document.getElementById('tx-detail-points-used').innerText = record.pointsUsed > 0 ? `- ${record.pointsUsed.toFixed(2)}` : '0';
+document.getElementById('tx-detail-points-earned').innerText = record.pointsEarned > 0 ? `+ ${record.pointsEarned.toFixed(2)}` : '0';
+const actualCash = Math.max(0, record.price - record.pointsUsed);
+document.getElementById('tx-detail-actual-cash').innerText = `$${actualCash.toFixed(2)}`;
+
+const buyersListHtml = record.buyers.map(b => `
+<div class="flex justify-between items-center bg-white p-3 border border-book-100 rounded-lg">
+<span class="font-bold text-book-800">${b}</span>
+<div class="text-right">
+<div class="font-mono font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>
+${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-600">+ ${record.perPersonPointsEarned.toFixed(2)} Pts</div>` : ''}
+</div>
+</div>
+`).join('');
+document.getElementById('tx-detail-buyers-list').innerHTML = record.buyers.length > 0 ? buyersListHtml : '<p class="text-book-400 text-sm italic">無參與者</p>';
+window.openModal('tx-detail-modal');
+}
+
+window.viewUserDetail = function(userName) {
+let expense = 0, paid = 0, points = 0, settledSent = 0, settledRecv = 0;
+let userHistory = [];
+
+window.recordsData.forEach(r => {
+const isPayer = r.payer === userName;
+const isBuyer = r.buyers && r.buyers.includes(userName);
+if (isPayer) paid += (r.price || 0);
+if (isBuyer) { expense += (r.perPersonCash || 0); points += (r.perPersonPointsEarned || 0); }
+if (isPayer || isBuyer) {
+userHistory.push({
+type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + (r.price\*100),
+title: r.title, isPayer, isBuyer, myExpense: isBuyer ? r.perPersonCash : 0,
+myPaid: isPayer ? r.price : 0, myPoints: isBuyer ? r.perPersonPointsEarned : 0
+});
+}
+});
+
+window.paymentsData.forEach(p => {
+const isSender = p.from === userName;
+const isReceiver = p.to === userName;
+if (isSender) settledSent += p.amount;
+if (isReceiver) settledRecv += p.amount;
+if (isSender || isReceiver) {
+userHistory.push({
+type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + (p.amount\*10),
+title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
+isSender, isReceiver, amount: p.amount
+});
+}
+});
+
+const balance = (paid + settledSent) - (expense + settledRecv);
+document.getElementById('user-detail-name').innerText = userName;
+document.getElementById('user-detail-avatar').innerText = userName.charAt(0);
+document.getElementById('user-detail-expense').innerText = `$${expense.toFixed(2)}`;
+document.getElementById('user-detail-paid').innerText = `$${paid.toFixed(2)}`;
+document.getElementById('user-detail-points').innerText = `+${points.toFixed(2)}`;
+
+const balanceEl = document.getElementById('user-detail-balance');
+if (balance > 0.01) balanceEl.innerHTML = `<span class="text-emerald-600">應收回(或預繳) $${balance.toFixed(2)}</span>`;
+else if (balance < -0.01) balanceEl.innerHTML = `<span class="text-red-600">需支付 $${Math.abs(balance).toFixed(2)}</span>`;
+else balanceEl.innerHTML = `<span class="text-book-600">已結清 ($0)</span>`;
+
+userHistory.sort((a,b) => b.timestamp - a.timestamp);
+const tbody = document.getElementById('user-detail-records-body');
+
+if (userHistory.length === 0) {
+tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何帳戶異動紀錄。</td></tr>`;
+} else {
+tbody.innerHTML = userHistory.map(item => {
+let roleTags = '', expenseCol = '-', cashFlowCol = '-';
+if (item.type === 'book') {
+if (item.isPayer && item.myPaid > 0) roleTags += `<span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] mr-1">代墊</span>`;
+if (item.isBuyer) roleTags += `<span class="bg-book-200 text-book-800 px-1.5 py-0.5 rounded text-[10px]">分攤</span>`;
+if (item.myExpense > 0) expenseCol = `<span class="text-book-800 font-bold">$${item.myExpense.toFixed(2)}</span>`;
+if (item.myPaid > 0) cashFlowCol = `<span class="text-blue-600 font-bold">掏出 $${item.myPaid.toFixed(2)}</span>`;
+if (item.myPoints > 0) expenseCol += `<span class="text-[10px] text-emerald-600 font-normal">+${item.myPoints.toFixed(2)} 點</span>`;
+} else if (item.type === 'payment') {
+if (item.isSender) {
+roleTags = `<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">支付還款</span>`;
+cashFlowCol = `<span class="text-red-600 font-bold">掏出 $${item.amount.toFixed(2)}</span>`;
+} else {
+roleTags = `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[10px]">收到還款</span>`;
+cashFlowCol = `<span class="text-emerald-600 font-bold">收回 $${item.amount.toFixed(2)}</span>`;
+}
+}
+return `
+<tr class="hover:bg-book-50/50 transition-colors">
+<td class="px-4 py-3"><div class="text-xs text-book-500">${item.date}</div><div class="font-bold text-book-900">${item.title}</div></td>
+<td class="px-4 py-3 text-center whitespace-nowrap">${roleTags}</td>
+<td class="px-4 py-3 text-right font-mono text-sm leading-tight">${expenseCol}</td>
+<td class="px-4 py-3 text-right font-mono text-sm">${cashFlowCol}</td>
+</tr>`;
+}).join('');
+}
+window.openModal('user-detail-modal');
+}
+
+window.applyFilter = function() { window.renderRecords(); }
+window.clearFilter = function() { document.getElementById('filter-start').value = ''; document.getElementById('filter-end').value = ''; window.renderRecords(); }
+
+window.renderDashboard = function() {
+let totalPoints = 0;
+let accounts = {};
+users.forEach(u => accounts[u] = { expense: 0, paid: 0, points: 0, settledSent: 0, settledRecv: 0 });
+
+window.recordsData.forEach(record => {
+totalPoints += (record.pointsEarned || 0); totalPoints -= (record.pointsUsed || 0);
+if (record.payer && accounts[record.payer]) accounts[record.payer].paid += (record.price || 0);
+if (record.buyers && record.buyers.length > 0) {
+record.buyers.forEach(buyer => {
+if (accounts[buyer]) {
+accounts[buyer].expense += (record.perPersonCash || 0);
+accounts[buyer].points += (record.perPersonPointsEarned || 0);
+}
+});
+}
+});
+document.getElementById('dash-total-points').innerText = totalPoints.toFixed(2);
+
+window.paymentsData.forEach(payment => {
+if (accounts[payment.from]) accounts[payment.from].settledSent += payment.amount;
+if (accounts[payment.to]) accounts[payment.to].settledRecv += payment.amount;
+});
+
+let balances = {};
+users.forEach(u => balances[u] = (accounts[u].paid + accounts[u].settledSent) - (accounts[u].expense + accounts[u].settledRecv));
+
+let debtors = [], creditors = [];
+for (let user in balances) {
+if (balances[user] < -0.01) debtors.push({ name: user, amount: -balances[user] });
+else if (balances[user] > 0.01) creditors.push({ name: user, amount: balances[user] });
+}
+debtors.sort((a, b) => b.amount - a.amount);
+creditors.sort((a, b) => b.amount - a.amount);
+
+let transfers = [];
+let dIndex = 0, cIndex = 0;
+while (dIndex < debtors.length && cIndex < creditors.length) {
+let debtor = debtors[dIndex]; let creditor = creditors[cIndex];
+let amountToTransfer = Math.min(debtor.amount, creditor.amount);
+if (amountToTransfer > 0.01) transfers.push({ from: debtor.name, to: creditor.name, amount: amountToTransfer });
+debtor.amount -= amountToTransfer; creditor.amount -= amountToTransfer;
+if (debtor.amount < 0.01) dIndex++; if (creditor.amount < 0.01) cIndex++;
+}
+
+const settlementContainer = document.getElementById('settlement-results');
+if (transfers.length === 0) {
+settlementContainer.innerHTML = `<p class="text-book-600 text-center py-4 flex items-center justify-center gap-2"><i class="ph ph-check-circle text-emerald-600 text-xl"></i> 目前所有帳目已結清，無須轉帳！</p>`;
+} else {
+settlementContainer.innerHTML = transfers.map(t => `
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-book-50 rounded-lg border border-book-100 gap-3">
+<div class="flex items-center gap-3">
+<span class="text-book-900">${t.from}</span>
+<i class="ph ph-arrow-right text-book-300"></i>
+<span class="text-book-900">${t.to}</span>
+<span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">應付 $${t.amount.toFixed(2)}</span>
+</div>
+<button onclick="window.openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
+<i class="ph ph-money"></i> 紀錄部分/全額還款
+</button>
+</div>
+`).join('');
+}
+
+const grid = document.getElementById('dashboard-users-grid');
+grid.innerHTML = users.map(user => {
+const acc = accounts[user]; const bal = balances[user];
+let statusHtml = '';
+if (bal > 0.01) statusHtml = `<span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">應收回 $${bal.toFixed(2)}</span>`;
+else if (bal < -0.01) statusHtml = `<span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100">需支付 $${Math.abs(bal).toFixed(2)}</span>`;
+else statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
+
+return `
+<div onclick="window.viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
+<div class="p-4 border-b border-book-100 flex items-center justify-between bg-book-50/50 group-hover:bg-book-100/50 transition-colors">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">${user.charAt(0)}</div>
+<h3 class="font-serif font-bold text-book-900 text-lg">${user}</h3>
+</div>
+${statusHtml}
+</div>
+<div class="p-4 flex flex-col gap-3 text-sm">
+<div class="flex justify-between items-center text-book-800"><span>共消費</span><span class="font-mono font-bold">$${acc.expense.toFixed(2)}</span></div>
+<div class="flex justify-between items-center text-book-800"><span>已代墊</span><span class="font-mono font-bold">$${acc.paid.toFixed(2)}</span></div>
+<div class="h-px w-full bg-book-100 my-1"></div>
+<div class="flex justify-between items-center"><span class="text-book-600 font-medium">個人獲得點數</span><span class="font-mono font-bold text-emerald-600">+${acc.points.toFixed(2)} Pts</span></div>
+</div>
+</div>`;
+}).join('');
+
+const leaderboardContainer = document.getElementById('leaderboard-container');
+const sortedUsers = [...users].sort((a, b) => accounts[b].expense - accounts[a].expense);
+const maxExpense = Math.max(...sortedUsers.map(u => accounts[u].expense), 1);
+
+if (maxExpense === 1 && sortedUsers[0].expense === 0) {
+leaderboardContainer.innerHTML = `<p class="text-book-400 text-center py-4 font-serif italic">目前大家的心如止水，尚未有任何購書紀錄。</p>`;
+} else {
+leaderboardContainer.innerHTML = sortedUsers.map((user, index) => {
+const exp = accounts[user].expense; const percentage = (exp / maxExpense) \* 100;
+let rankIcon = index === 0 ? '<i class="ph-fill ph-medal text-yellow-500 text-3xl drop-shadow-sm"></i>' :
+index === 1 ? '<i class="ph-fill ph-medal text-slate-400 text-3xl drop-shadow-sm"></i>' :
+index === 2 ? '<i class="ph-fill ph-medal text-amber-700 text-3xl drop-shadow-sm"></i>' :
+`<span class="w-8 text-center font-bold text-book-400 font-serif text-lg">${index + 1}</span>`;
+
+return `
+<div class="flex items-center gap-3 sm:gap-4 group">
+<div class="flex-shrink-0 w-10 flex justify-center">${rankIcon}</div>
+<div class="font-serif font-bold text-book-900 w-12 text-lg">${user}</div>
+<div class="flex-grow h-4 bg-book-100 rounded-full overflow-hidden shadow-inner">
+<div class="h-full bg-book-600 rounded-full transition-all duration-1000 ease-out relative overflow-hidden" style="width: ${percentage}%"><div class="absolute inset-0 bg-white/20 w-full h-full transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div></div>
+</div>
+<div class="w-24 text-right font-mono font-bold text-book-900 text-lg">$${exp.toFixed(2)}</div>
+</div>`;
+}).join('');
+}
+}
+
+window.renderRecords = function() {
+const tbody = document.getElementById('records-table-body');
+const startDate = document.getElementById('filter-start').value;
+const endDate = document.getElementById('filter-end').value;
+
+let filteredRecords = [...window.recordsData];
+if (startDate) filteredRecords = filteredRecords.filter(r => r.date >= startDate);
+if (endDate) filteredRecords = filteredRecords.filter(r => r.date <= endDate);
+
+if (filteredRecords.length === 0) {
+const message = window.recordsData.length === 0 ? "尚無任何紀錄，點擊右上角新增吧！" : "此區間查無紀錄。";
+tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-12 text-center text-book-300 font-serif italic">${message}</td></tr>`;
+return;
+}
+
+const sortedRecords = filteredRecords.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+tbody.innerHTML = sortedRecords.map(record => {
+const isOnlyPoints = record.price === 0 && record.pointsEarned > 0;
+return `
+<tr onclick="window.viewTransactionDetail('${record.fbId}', ${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
+<td class="px-4 py-3 whitespace-nowrap text-sm text-book-600">${record.date}</td>
+<td class="px-4 py-3 text-sm font-serif font-bold text-book-900">${record.title}${isOnlyPoints ? `<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>` : ''}</td>
+<td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${record.payer}</span>` : '-'}</td>
+<td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${record.price.toFixed(2)}</div>${record.pointsUsed > 0 ? `<div class="text-xs text-red-500 mt-0.5">- ${record.pointsUsed.toFixed(2)} 點</div>` : ''}</td>
+<td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-emerald-600 font-bold">${record.pointsEarned > 0 ? `+${record.pointsEarned.toFixed(2)}` : '-'}</td>
+<td class="px-4 py-3 text-sm text-book-800"><div class="flex flex-wrap gap-1">${record.buyers.length > 0 ? record.buyers.map(b => `<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">${b}</span>`).join('') : '-'}</div></td>
+<td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${record.perPersonPointsEarned.toFixed(2)} 點</div>` : ''}</td>
+<td class="px-4 py-3 whitespace-nowrap text-center">
+<button onclick="event.stopPropagation(); window.editRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+<button onclick="event.stopPropagation(); window.fbDeleteRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
+</td>
+</tr>`;
+}).join('');
+}
+
+</script>
 </body>
 </html>
 ```eof
