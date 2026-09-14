@@ -54,7 +54,7 @@
         </div>
         
         <!-- 全域讀取進度條 -->
-        <div id="loading-bar" class="w-full bg-emerald-500 h-1 hidden"></div>
+        <div id="loading-bar" class="w-full bg-emerald-500 h-1 hidden transition-all duration-300"></div>
     </header>
 
     <main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 relative z-10">
@@ -157,7 +157,6 @@
                 </div>
             </div>
         </div>
-
     </main>
 
     <!-- Modal: 新增/編輯購書紀錄 -->
@@ -369,8 +368,8 @@
                                     <tr>
                                         <th class="px-4 py-3 text-left text-xs font-medium text-book-800">日期 / 項目</th>
                                         <th class="px-4 py-3 text-center text-xs font-medium text-book-800">角色</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="自己實際上應該負擔的成本">帳單分攤</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="實際掏出或收回的現金">實際金流</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800">帳單分攤</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800">實際金流</th>
                                     </tr>
                                 </thead>
                                 <tbody id="user-detail-records-body" class="bg-white divide-y divide-book-100 text-sm">
@@ -461,8 +460,8 @@
                 await loadFromCloud();
             } else {
                 // 如果沒有雲端 ID，讀取本地，確保全新開始
-                recordsData = JSON.parse(localStorage.getItem('book_cloud_records_local_v2')) || [];
-                paymentsData = JSON.parse(localStorage.getItem('book_cloud_payments_local_v2')) || [];
+                recordsData = JSON.parse(localStorage.getItem('book_cloud_records_local_v3')) || [];
+                paymentsData = JSON.parse(localStorage.getItem('book_cloud_payments_local_v3')) || [];
                 updateUI(false); 
             }
         }
@@ -486,7 +485,7 @@
                 } else {
                      response = await fetch(JSONBIN_URL, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey, 'X-Bin-Name': 'BookSplitData_Fresh' },
+                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey, 'X-Bin-Name': 'BookSplitData_Clean' },
                         body: JSON.stringify(payload)
                     });
                 }
@@ -503,7 +502,7 @@
                     alert('🎉 全新帳本的雲端網址已產生並複製！\n請直接貼上這個網址給朋友們，大家都會同步看到最新的資料。');
                 });
 
-                btn.innerHTML = `<i class="ph-fill ph-cloud-check"></i> 點擊手動儲存同步`;
+                btn.innerHTML = `<i class="ph-fill ph-cloud-check"></i> 手動儲存同步`;
                 btn.classList.replace('bg-emerald-100', 'bg-blue-100');
                 btn.classList.replace('text-emerald-800', 'text-blue-800');
                 btn.classList.replace('border-emerald-300', 'border-blue-300');
@@ -537,8 +536,8 @@
 
         function updateUI(autoSync = true) {
             if (!cloudBinId) {
-                localStorage.setItem('book_cloud_records_local_v2', JSON.stringify(recordsData));
-                localStorage.setItem('book_cloud_payments_local_v2', JSON.stringify(paymentsData));
+                localStorage.setItem('book_cloud_records_local_v3', JSON.stringify(recordsData));
+                localStorage.setItem('book_cloud_payments_local_v3', JSON.stringify(paymentsData));
             } else if (autoSync && cloudBinId) {
                 document.getElementById('loading-bar').classList.remove('hidden');
                 fetch(`${JSONBIN_URL}/${cloudBinId}`, {
