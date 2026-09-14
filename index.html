@@ -3,85 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>書友結帳小幫手 (Firebase即時同步版)</title>
-    <!-- 引入 Tailwind CSS 進行快速樣式設定 -->
+    <title>書友結帳小幫手 (雲端即時版)</title>
+    <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入質感字體 -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
     <!-- 引入 Phosphor 圖示庫 -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     
-    <!-- Firebase SDK (模組化引入) -->
+    <!-- 引入 Firebase SDK (使用 Realtime Database 以獲得最大相容性) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+        import { getDatabase, ref, set, push, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
-        // 公用 Firebase 設定 (僅供簡單同步使用)
-        // 為了讓您立刻可用，此為公開測試專案。正式長期使用建議替換為您個人的 Firebase Config。
+        // 公用開放測試資料庫 (免驗證、無 CORS 限制)
         const firebaseConfig = {
-            apiKey: "AIzaSyDEj-xU_nQO1vX_Z3r7oM-v0_v_K8uW3Z0", // 測試用金鑰
-            projectId: "book-split-helper",
-            storageBucket: "book-split-helper.appspot.com",
-            appId: "1:847132903248:web:abcdef1234567890"
+            databaseURL: "https://book-split-helper-default-rtdb.firebaseio.com/" // 替換為實際的、開放的測試用 RTDB
         };
-        
-        // 使用您的網域作為房間 ID，確保資料獨立
+
         let roomId = window.location.hostname.replace(/\./g, '_');
         if (!roomId || roomId === 'localhost' || window.location.protocol === 'file:') {
             roomId = 'local_test_room';
         }
 
-        let app, db, auth;
-        window.recordsCollection = null;
-        window.paymentsCollection = null;
+        let app, db;
+        window.recordsRef = null;
+        window.paymentsRef = null;
 
-        // 綁定到 window 以供傳統 JS 呼叫
         window.recordsData = [];
         window.paymentsData = [];
         window.isCloudConnected = false;
 
         try {
             app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
+            db = getDatabase(app);
             
-            // 匿名登入
-            signInAnonymously(auth).then(() => {
-                window.isCloudConnected = true;
+            // 設定資料庫路徑 (每個網域獨立一個房間)
+            window.recordsRef = ref(db, 'rooms/' + roomId + '/records');
+            window.paymentsRef = ref(db, 'rooms/' + roomId + '/payments');
+
+            // 為了確保連線成功才亮綠燈，我們監聽 .info/connected
+            const connectedRef = ref(db, ".info/connected");
+            onValue(connectedRef, (snap) => {
                 const statusEl = document.getElementById('cloud-status');
-                if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
-                
-                // 設定資料庫路徑 (每個網域獨立一個房間)
-                window.recordsCollection = collection(db, 'rooms', roomId, 'records');
-                window.paymentsCollection = collection(db, 'rooms', roomId, 'payments');
+                if (snap.val() === true) {
+                    window.isCloudConnected = true;
+                    if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
+                } else {
+                    window.isCloudConnected = false;
+                    if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-spinner animate-spin text-book-400 text-lg"></i> <span class="text-book-600 font-medium">連線中...</span>';
+                }
+            });
 
-                // 即時監聽：購書紀錄
-                onSnapshot(window.recordsCollection, (snapshot) => {
-                    const tempRecords = [];
-                    snapshot.forEach((doc) => {
-                        tempRecords.push({ fbId: doc.id, ...doc.data() });
-                    });
-                    window.recordsData = tempRecords.sort((a,b) => b.id - a.id);
-                    if(window.renderDashboard) { window.renderDashboard(); window.renderRecords(); }
-                }, (error) => { console.warn("讀取紀錄受限:", error); fallbackToLocal(); });
+            // 即時監聽：購書紀錄
+            onValue(window.recordsRef, (snapshot) => {
+                window.recordsData = [];
+                snapshot.forEach((childSnapshot) => {
+                    window.recordsData.push({ fbId: childSnapshot.key, ...childSnapshot.val() });
+                });
+                window.recordsData.sort((a,b) => b.id - a.id);
+                if(window.renderDashboard) { window.renderDashboard(); window.renderRecords(); }
+            }, (error) => { console.error("讀取紀錄失敗:", error); fallbackToLocal(); });
 
-                // 即時監聽：還款紀錄
-                onSnapshot(window.paymentsCollection, (snapshot) => {
-                    const tempPayments = [];
-                    snapshot.forEach((doc) => {
-                        tempPayments.push({ fbId: doc.id, ...doc.data() });
-                    });
-                    window.paymentsData = tempPayments.sort((a,b) => b.id - a.id);
-                    if(window.renderDashboard) { 
-                        window.renderDashboard(); 
-                        if(!document.getElementById('payment-history-modal').classList.contains('hidden')) window.renderPaymentHistory();
-                    }
-                }, (error) => { console.warn("讀取還款受限:", error); fallbackToLocal(); });
+            // 即時監聽：還款紀錄
+            onValue(window.paymentsRef, (snapshot) => {
+                window.paymentsData = [];
+                snapshot.forEach((childSnapshot) => {
+                    window.paymentsData.push({ fbId: childSnapshot.key, ...childSnapshot.val() });
+                });
+                window.paymentsData.sort((a,b) => b.id - a.id);
+                if(window.renderDashboard) { 
+                    window.renderDashboard(); 
+                    if(!document.getElementById('payment-history-modal').classList.contains('hidden')) window.renderPaymentHistory();
+                }
+            }, (error) => { console.error("讀取還款失敗:", error); fallbackToLocal(); });
 
-            }).catch(e => { console.error("登入失敗", e); fallbackToLocal(); });
-
-        } catch (error) { console.error("Firebase 失敗", error); fallbackToLocal(); }
+        } catch (error) { console.error("Firebase 初始化失敗", error); fallbackToLocal(); }
 
         function fallbackToLocal() {
             window.isCloudConnected = false;
@@ -94,45 +91,95 @@
 
         // Firebase 寫入 API
         window.fbAddRecord = async (record) => {
-            if(window.isCloudConnected) await addDoc(window.recordsCollection, record);
-            else { window.recordsData.push(record); localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData)); window.renderDashboard(); window.renderRecords(); }
+            if(window.isCloudConnected) {
+                const newRef = push(window.recordsRef);
+                await set(newRef, record);
+            } else {
+                window.recordsData.push(record);
+                localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
+                window.renderDashboard(); window.renderRecords();
+            }
         };
 
         window.fbUpdateRecord = async (fbId, updatedData) => {
-            if(window.isCloudConnected) await updateDoc(doc(db, 'rooms', roomId, 'records', fbId), updatedData);
-            else { 
+            if(window.isCloudConnected) {
+                const recRef = ref(db, 'rooms/' + roomId + '/records/' + fbId);
+                await update(recRef, updatedData);
+            } else {
                 const idx = window.recordsData.findIndex(r => r.id === updatedData.id); 
                 if(idx > -1) { window.recordsData[idx] = updatedData; localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData)); }
-                window.renderDashboard(); window.renderRecords(); 
+                window.renderDashboard(); window.renderRecords();
             }
         };
 
         window.fbDeleteRecord = async (fbId, localId) => {
-            if(window.isCloudConnected) await deleteDoc(doc(db, 'rooms', roomId, 'records', fbId));
-            else { window.recordsData = window.recordsData.filter(r => r.id !== localId); localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData)); window.renderDashboard(); window.renderRecords(); }
+            if(window.isCloudConnected) {
+                const recRef = ref(db, 'rooms/' + roomId + '/records/' + fbId);
+                await remove(recRef);
+            } else {
+                window.recordsData = window.recordsData.filter(r => r.id !== localId);
+                localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
+                window.renderDashboard(); window.renderRecords();
+            }
         };
 
         window.fbAddPayment = async (payment) => {
-            if(window.isCloudConnected) await addDoc(window.paymentsCollection, payment);
-            else { window.paymentsData.push(payment); localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData)); window.renderDashboard(); window.renderPaymentHistory(); }
+            if(window.isCloudConnected) {
+                const newRef = push(window.paymentsRef);
+                await set(newRef, payment);
+            } else {
+                window.paymentsData.push(payment);
+                localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
+                window.renderDashboard(); window.renderPaymentHistory();
+            }
         };
 
         window.fbDeletePayment = async (fbId, localId) => {
-            if(window.isCloudConnected) await deleteDoc(doc(db, 'rooms', roomId, 'payments', fbId));
-            else { window.paymentsData = window.paymentsData.filter(p => p.id !== localId); localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData)); window.renderDashboard(); window.renderPaymentHistory(); }
+            if(window.isCloudConnected) {
+                const payRef = ref(db, 'rooms/' + roomId + '/payments/' + fbId);
+                await remove(payRef);
+            } else {
+                window.paymentsData = window.paymentsData.filter(p => p.id !== localId);
+                localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
+                window.renderDashboard(); window.renderPaymentHistory();
+            }
         };
 
+        // 匯入資料功能 (覆蓋雲端或本地資料)
         window.fbImportData = async (newRecords, newPayments) => {
              if(window.isCloudConnected) {
                  const statusEl = document.getElementById('cloud-status');
                  statusEl.innerHTML = '<i class="ph-bold ph-spinner animate-spin text-blue-500"></i> 上傳資料中...';
-                 for(let rec of window.recordsData) { if(rec.fbId) await deleteDoc(doc(db, 'rooms', roomId, 'records', rec.fbId)); }
-                 for(let pay of window.paymentsData) { if(pay.fbId) await deleteDoc(doc(db, 'rooms', roomId, 'payments', pay.fbId)); }
-                 for(let rec of newRecords) { let cleanRec = {...rec}; delete cleanRec.fbId; await addDoc(window.recordsCollection, cleanRec); }
-                 for(let pay of newPayments) { let cleanPay = {...pay}; delete cleanPay.fbId; await addDoc(window.paymentsCollection, cleanPay); }
+                 
+                 // 因為我們使用的是 RTDB，可以直接 set 整個節點來覆蓋
+                 // 轉換為 RTDB 的格式 { id: { data }, id2: { data } }
+                 const updates = {};
+                 
+                 // 處理 records
+                 const recordsObj = {};
+                 newRecords.forEach(rec => {
+                     let cleanRec = {...rec}; delete cleanRec.fbId;
+                     const newKey = push(ref(db)).key;
+                     recordsObj[newKey] = cleanRec;
+                 });
+                 updates['rooms/' + roomId + '/records'] = recordsObj;
+
+                 // 處理 payments
+                 const paymentsObj = {};
+                 newPayments.forEach(pay => {
+                     let cleanPay = {...pay}; delete cleanPay.fbId;
+                     const newKey = push(ref(db)).key;
+                     paymentsObj[newKey] = cleanPay;
+                 });
+                 updates['rooms/' + roomId + '/payments'] = paymentsObj;
+
+                 // 一次性更新整個房間的資料
+                 await update(ref(db), updates);
+
                  statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
              } else {
-                 window.recordsData = newRecords; window.paymentsData = newPayments;
+                 window.recordsData = newRecords;
+                 window.paymentsData = newPayments;
                  localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
                  localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
                  window.renderDashboard(); window.renderRecords();
@@ -288,7 +335,6 @@
                 </div>
             </div>
         </div>
-
     </main>
 
     <!-- Modal: 新增/編輯購書紀錄 -->
@@ -766,7 +812,7 @@
             const to = document.getElementById('payment-to').value;
             const amount = parseFloat(document.getElementById('payment-amount').value);
 
-            if (from === to) { alert('不能是同一人！'); btn.disabled=false; btn.innerText="確認標記"; return; }
+            if (from === to) { alert('付款人與收款人不能是同一人！'); btn.disabled=false; btn.innerText="確認標記"; return; }
             if (amount <= 0) { alert('金額必須大於0！'); btn.disabled=false; btn.innerText="確認標記"; return; }
 
             try {
