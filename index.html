@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -8,7 +7,7 @@
 <!-- 引入 Tailwind CSS -->
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- 引入質感字體 -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600\&family=Noto+Sans+TC:wght@400;500\&family=Noto+Serif+TC:wght@400;500;700;900\&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
 <!-- 引入 Phosphor 圖示庫 -->
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
@@ -904,7 +903,7 @@ if (isPayer) paid += (r.price || 0);
 if (isBuyer) { expense += (r.perPersonCash || 0); points += (r.perPersonPointsEarned || 0); }
 if (isPayer || isBuyer) {
 userHistory.push({
-type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + (r.price\*100),
+type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + (r.price * 100),
 title: r.title, isPayer, isBuyer, myExpense: isBuyer ? r.perPersonCash : 0,
 myPaid: isPayer ? r.price : 0, myPoints: isBuyer ? r.perPersonPointsEarned : 0
 });
@@ -918,7 +917,7 @@ if (isSender) settledSent += p.amount;
 if (isReceiver) settledRecv += p.amount;
 if (isSender || isReceiver) {
 userHistory.push({
-type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + (p.amount\*10),
+type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + (p.amount * 10),
 title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
 isSender, isReceiver, amount: p.amount
 });
@@ -1073,7 +1072,7 @@ if (maxExpense === 1 && sortedUsers[0].expense === 0) {
 leaderboardContainer.innerHTML = `<p class="text-book-400 text-center py-4 font-serif italic">目前大家的心如止水，尚未有任何購書紀錄。</p>`;
 } else {
 leaderboardContainer.innerHTML = sortedUsers.map((user, index) => {
-const exp = accounts[user].expense; const percentage = (exp / maxExpense) \* 100;
+const exp = accounts[user].expense; const percentage = (exp / maxExpense) * 100;
 let rankIcon = index === 0 ? '<i class="ph-fill ph-medal text-yellow-500 text-3xl drop-shadow-sm"></i>' :
 index === 1 ? '<i class="ph-fill ph-medal text-slate-400 text-3xl drop-shadow-sm"></i>' :
 index === 2 ? '<i class="ph-fill ph-medal text-amber-700 text-3xl drop-shadow-sm"></i>' :
@@ -1131,4 +1130,3 @@ return `
 </script>
 </body>
 </html>
-```eof
