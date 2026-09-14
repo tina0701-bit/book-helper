@@ -3,189 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>書友結帳小幫手 (雲端即時版)</title>
-    <!-- 引入 Tailwind CSS -->
+    <title>書友結帳小幫手 (原生雲端版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入質感字體 -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
-    <!-- 引入 Phosphor 圖示庫 -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    
-    <!-- 引入 Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getDatabase, ref, set, push, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
-
-        // 公用開放測試資料庫 (免驗證、無 CORS 限制)
-        const firebaseConfig = {
-            databaseURL: "https://boolhepler-default-rtdb.asia-southeast1.firebasedatabase.app/" // 替換為實際的、開放的測試用 RTDB
-        };
-
-        let roomId = window.location.hostname.replace(/\./g, '_');
-        if (!roomId || roomId === 'localhost' || window.location.protocol === 'file:') {
-            roomId = 'local_test_room';
-        }
-
-        let app, db;
-        window.recordsRef = null;
-        window.paymentsRef = null;
-
-        window.recordsData = [];
-        window.paymentsData = [];
-        window.isCloudConnected = false;
-
-        try {
-            app = initializeApp(firebaseConfig);
-            db = getDatabase(app);
-            
-            // 設定資料庫路徑
-            window.recordsRef = ref(db, 'rooms/' + roomId + '/records');
-            window.paymentsRef = ref(db, 'rooms/' + roomId + '/payments');
-
-            // 監聽連線狀態
-            const connectedRef = ref(db, ".info/connected");
-            onValue(connectedRef, (snap) => {
-                const statusEl = document.getElementById('cloud-status');
-                if (snap.val() === true) {
-                    window.isCloudConnected = true;
-                    if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
-                } else {
-                    window.isCloudConnected = false;
-                    if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-spinner animate-spin text-book-400 text-lg"></i> <span class="text-book-600 font-medium">連線中...</span>';
-                }
-            });
-
-            // 即時監聽：購書紀錄 (加上空值防護網)
-            onValue(window.recordsRef, (snapshot) => {
-                window.recordsData = [];
-                snapshot.forEach((childSnapshot) => {
-                    const data = childSnapshot.val();
-                    window.recordsData.push({ 
-                        fbId: childSnapshot.key, 
-                        buyers: [], // 防護網：預防 Firebase 吃掉空陣列
-                        title: '',  // 防護網：預防沒有書名
-                        ...data 
-                    });
-                });
-                window.recordsData.sort((a,b) => b.id - a.id);
-                if(window.renderDashboard) { window.renderDashboard(); window.renderRecords(); }
-            }, (error) => { console.error("讀取紀錄失敗:", error); fallbackToLocal(); });
-
-            // 即時監聽：還款紀錄
-            onValue(window.paymentsRef, (snapshot) => {
-                window.paymentsData = [];
-                snapshot.forEach((childSnapshot) => {
-                    window.paymentsData.push({ fbId: childSnapshot.key, ...childSnapshot.val() });
-                });
-                window.paymentsData.sort((a,b) => b.id - a.id);
-                if(window.renderDashboard) { 
-                    window.renderDashboard(); 
-                    if(!document.getElementById('payment-history-modal').classList.contains('hidden')) window.renderPaymentHistory();
-                }
-            }, (error) => { console.error("讀取還款失敗:", error); fallbackToLocal(); });
-
-        } catch (error) { console.error("Firebase 初始化失敗", error); fallbackToLocal(); }
-
-        function fallbackToLocal() {
-            window.isCloudConnected = false;
-            const statusEl = document.getElementById('cloud-status');
-            if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-hard-drive text-amber-500 text-lg"></i> <span class="text-amber-700 font-medium">離線模式 (僅存於本機)</span>';
-            window.recordsData = JSON.parse(localStorage.getItem(`book_local_records_${roomId}`)) || [];
-            window.paymentsData = JSON.parse(localStorage.getItem(`book_local_payments_${roomId}`)) || [];
-            setTimeout(() => { if(window.renderDashboard) { window.renderDashboard(); window.renderRecords(); } }, 200);
-        }
-
-        // Firebase 寫入 API
-        window.fbAddRecord = async (record) => {
-            if(window.isCloudConnected) {
-                const newRef = push(window.recordsRef);
-                await set(newRef, record);
-            } else {
-                window.recordsData.push(record);
-                localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
-                window.renderDashboard(); window.renderRecords();
-            }
-        };
-
-        window.fbUpdateRecord = async (fbId, updatedData) => {
-            if(window.isCloudConnected) {
-                const recRef = ref(db, 'rooms/' + roomId + '/records/' + fbId);
-                await update(recRef, updatedData);
-            } else {
-                const idx = window.recordsData.findIndex(r => r.id === updatedData.id); 
-                if(idx > -1) { window.recordsData[idx] = updatedData; localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData)); }
-                window.renderDashboard(); window.renderRecords();
-            }
-        };
-
-        window.fbDeleteRecord = async (fbId, localId) => {
-            if(window.isCloudConnected) {
-                const recRef = ref(db, 'rooms/' + roomId + '/records/' + fbId);
-                await remove(recRef);
-            } else {
-                window.recordsData = window.recordsData.filter(r => r.id !== localId);
-                localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
-                window.renderDashboard(); window.renderRecords();
-            }
-        };
-
-        window.fbAddPayment = async (payment) => {
-            if(window.isCloudConnected) {
-                const newRef = push(window.paymentsRef);
-                await set(newRef, payment);
-            } else {
-                window.paymentsData.push(payment);
-                localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
-                window.renderDashboard(); window.renderPaymentHistory();
-            }
-        };
-
-        window.fbDeletePayment = async (fbId, localId) => {
-            if(window.isCloudConnected) {
-                const payRef = ref(db, 'rooms/' + roomId + '/payments/' + fbId);
-                await remove(payRef);
-            } else {
-                window.paymentsData = window.paymentsData.filter(p => p.id !== localId);
-                localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
-                window.renderDashboard(); window.renderPaymentHistory();
-            }
-        };
-
-        // 匯入資料功能
-        window.fbImportData = async (newRecords, newPayments) => {
-             if(window.isCloudConnected) {
-                 const statusEl = document.getElementById('cloud-status');
-                 statusEl.innerHTML = '<i class="ph-bold ph-spinner animate-spin text-blue-500"></i> 上傳資料中...';
-                 
-                 const updates = {};
-                 const recordsObj = {};
-                 newRecords.forEach(rec => {
-                     let cleanRec = {...rec}; delete cleanRec.fbId;
-                     const newKey = push(ref(db)).key;
-                     recordsObj[newKey] = cleanRec;
-                 });
-                 updates['rooms/' + roomId + '/records'] = recordsObj;
-
-                 const paymentsObj = {};
-                 newPayments.forEach(pay => {
-                     let cleanPay = {...pay}; delete cleanPay.fbId;
-                     const newKey = push(ref(db)).key;
-                     paymentsObj[newKey] = cleanPay;
-                 });
-                 updates['rooms/' + roomId + '/payments'] = paymentsObj;
-
-                 await update(ref(db), updates);
-                 statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
-             } else {
-                 window.recordsData = newRecords;
-                 window.paymentsData = newPayments;
-                 localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
-                 localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
-                 window.renderDashboard(); window.renderRecords();
-             }
-        }
-    </script>
-
     <script>
         tailwind.config = {
             theme: {
@@ -213,21 +34,20 @@
                     <i class="ph-fill ph-books text-2xl text-book-600"></i>
                     <span class="font-serif font-bold text-xl tracking-wide">書友帳房總覽</span>
                     
-                    <!-- 雲端狀態指示器 -->
                     <span id="cloud-status" class="text-xs ml-2 bg-book-50 px-3 py-1.5 rounded-full border border-book-200 flex items-center gap-1.5 shadow-inner">
                         <i class="ph ph-spinner animate-spin text-book-400"></i> 正在連線資料庫...
                     </span>
                 </div>
-                <button onclick="openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm self-start sm:self-auto">
+                <button onclick="window.openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm self-start sm:self-auto">
                     <i class="ph ph-database text-lg"></i> <span class="hidden sm:inline">資料批次匯入</span>
                 </button>
             </div>
             <!-- 頁籤切換按鈕 -->
             <nav class="flex space-x-8 overflow-x-auto no-scrollbar -mb-px bg-white" aria-label="Tabs">
-                <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-book-900 text-book-900">
+                <button onclick="window.switchTab('dashboard')" id="tab-dashboard" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-book-900 text-book-900">
                     <i class="ph ph-squares-four mr-1"></i> 結帳總覽
                 </button>
-                <button onclick="switchTab('records')" id="tab-records" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-book-300 hover:text-book-600 hover:border-book-300">
+                <button onclick="window.switchTab('records')" id="tab-records" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-book-300 hover:text-book-600 hover:border-book-300">
                     <i class="ph ph-receipt mr-1"></i> 購書與點數紀錄
                 </button>
             </nav>
@@ -238,7 +58,6 @@
         
         <!-- Dashboard 頁籤 -->
         <div id="view-dashboard" class="view-section fade-in block">
-            
             <div class="bg-book-900 rounded-xl shadow-md p-6 mb-8 border-t-4 border-book-600 overflow-hidden relative">
                 <div class="flex flex-col relative z-10">
                     <p class="text-book-300 text-sm font-medium mb-1 tracking-widest font-sans">藏書閣共用點數餘額</p>
@@ -249,24 +68,21 @@
                 </div>
                 <i class="ph-fill ph-book-bookmark absolute -right-6 -bottom-8 text-[10rem] text-white opacity-5 pointer-events-none"></i>
             </div>
-
             <div class="mb-8">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                     <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
                         <i class="ph-fill ph-arrows-left-right text-book-600"></i> 轉帳建議
                     </h2>
-                    <button onclick="openModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-book-50 shadow-sm flex items-center gap-2 transition-colors">
+                    <button onclick="window.openModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-book-50 shadow-sm flex items-center gap-2 transition-colors">
                         <i class="ph ph-clock-counter-clockwise"></i> 歷史還款紀錄
                     </button>
                 </div>
                 <div class="bg-white rounded-xl shadow-sm border border-book-200 p-6"><div id="settlement-results" class="space-y-3 font-sans"></div></div>
             </div>
-
             <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center justify-between">
                 <span>個人帳戶明細</span><span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊卡片可查看個人紀錄</span>
             </h2>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="dashboard-users-grid"></div>
-            
             <div class="mt-10 mb-4">
                 <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center gap-2">
                     <i class="ph-fill ph-trophy text-yellow-600"></i> 藏書閣大戶排行榜
@@ -281,14 +97,14 @@
                 <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
                     帳目明細表 <span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊列可查看詳細</span>
                 </h2>
-                <button onclick="openModal('transaction-modal')" class="bg-book-900 text-white px-5 py-2.5 rounded-md text-sm font-medium hover:bg-book-800 shadow-sm flex items-center gap-2 transition-colors">
+                <button onclick="window.openModal('transaction-modal')" class="bg-book-900 text-white px-5 py-2.5 rounded-md text-sm font-medium hover:bg-book-800 shadow-sm flex items-center gap-2 transition-colors">
                     <i class="ph ph-plus-circle text-lg"></i> 新增購書/點數
                 </button>
             </div>
 
+            <!-- 包含書名搜尋的篩選區塊 -->
             <div class="bg-white rounded-xl shadow-sm border border-book-200 p-4 mb-4 flex flex-col gap-3">
                 <div class="flex flex-col md:flex-row gap-4 items-end">
-                    <!-- 搜尋關鍵字框 -->
                     <div class="flex-grow w-full md:w-auto">
                         <label class="block text-xs font-medium text-book-800 mb-1">搜尋書名 / 項目</label>
                         <div class="relative">
@@ -334,13 +150,9 @@
     </main>
 
     <!-- Modal 區域 -->
-    <!-- 新增紀錄 -->
     <div id="transaction-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-book-200 my-8 relative z-50">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10">
-                <h3 id="modal-title" class="text-lg font-serif font-bold text-book-900">新增帳目紀錄</h3>
-                <button onclick="closeModal('transaction-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
-            </div>
+            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10"><h3 id="modal-title" class="text-lg font-serif font-bold text-book-900">新增帳目紀錄</h3><button onclick="window.closeModal('transaction-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
             <form id="add-transaction-form" class="p-6 space-y-5">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><label class="block text-sm font-medium text-book-800 mb-1">日期</label><input type="date" id="trans-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white"></div>
@@ -356,10 +168,7 @@
                     <div><label class="block text-xs font-medium text-book-800 mb-1">獲得點數 (+)</label><input type="number" id="trans-points-earned" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-sans" value="0"></div>
                 </div>
                 <div><label class="block text-sm font-medium text-book-800 mb-2">誰有參與這筆帳？</label><div class="grid grid-cols-2 gap-3" id="trans-buyers-checkboxes"></div></div>
-                <div class="pt-2 flex gap-3">
-                    <button type="button" onclick="closeModal('transaction-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50 transition-colors">取消</button>
-                    <button type="submit" id="save-trans-btn" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button>
-                </div>
+                <div class="pt-2 flex gap-3"><button type="button" onclick="window.closeModal('transaction-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50 transition-colors">取消</button><button type="submit" id="save-trans-btn" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button></div>
             </form>
         </div>
     </div>
@@ -367,7 +176,7 @@
     <!-- 還款紀錄 -->
     <div id="settle-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border border-book-200">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center"><h3 class="text-lg font-serif font-bold text-book-900">紀錄還款金額</h3><button onclick="closeModal('settle-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
+            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center"><h3 class="text-lg font-serif font-bold text-book-900">紀錄還款金額</h3><button onclick="window.closeModal('settle-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
             <form id="add-payment-form" class="p-6 space-y-4">
                 <div><label class="block text-sm font-medium text-book-800 mb-1">還款日期</label><input type="date" id="payment-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-white"></div>
                 <div class="flex items-center gap-2">
@@ -378,33 +187,30 @@
                 <div>
                     <label class="block text-sm font-medium text-book-800 mb-1">實際還款/預繳金額</label>
                     <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3 text-book-500 font-mono">$</span><input type="number" id="payment-amount" step="0.01" required min="0.01" class="w-full border border-book-200 rounded-md pl-7 pr-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-mono font-bold text-lg text-book-900"></div>
-                    <p class="text-xs text-book-500 mt-2 leading-relaxed">可填寫部分金額或全額。<br>若<span class="text-emerald-600 font-medium">多繳(溢繳)</span>，系統會自動記錄為預繳金，於未來購書時自動扣除。</p>
                 </div>
-                <div class="pt-4 flex gap-3"><button type="button" onclick="closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button><button type="submit" id="save-pay-btn" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button></div>
+                <div class="pt-4 flex gap-3"><button type="button" onclick="window.closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button><button type="submit" id="save-pay-btn" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button></div>
             </form>
         </div>
     </div>
 
-    <!-- 歷史還款紀錄清單 -->
     <div id="payment-history-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-book-200 flex flex-col max-h-[80vh]">
-            <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-center sticky top-0"><h3 class="text-xl font-serif font-bold text-book-900">全域歷史還款紀錄</h3><button onclick="closeModal('payment-history-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
+            <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-center sticky top-0"><h3 class="text-xl font-serif font-bold text-book-900">全域歷史還款紀錄</h3><button onclick="window.closeModal('payment-history-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
             <div class="flex-1 overflow-y-auto p-0 no-scrollbar">
                 <table class="min-w-full divide-y divide-book-100">
                     <thead class="bg-book-50/50 sticky top-0"><tr><th class="px-4 py-3 text-left text-xs font-medium text-book-500">日期</th><th class="px-4 py-3 text-left text-xs font-medium text-book-500">還款流向</th><th class="px-4 py-3 text-right text-xs font-medium text-book-500">金額</th><th class="px-4 py-3 text-center text-xs font-medium text-book-500">操作</th></tr></thead>
                     <tbody id="payment-history-body" class="divide-y divide-book-100 text-sm"></tbody>
                 </table>
             </div>
-            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end"><button onclick="closeModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100">關閉</button></div>
+            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end"><button onclick="window.closeModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100">關閉</button></div>
         </div>
     </div>
 
-    <!-- 單筆明細詳細檢視 -->
     <div id="tx-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-book-200 my-8 flex flex-col">
             <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-start">
                 <div><span id="tx-detail-date" class="text-xs text-book-500 font-medium mb-1 block"></span><h3 id="tx-detail-title" class="text-xl font-serif font-bold text-book-900"></h3></div>
-                <button onclick="closeModal('tx-detail-modal')" class="text-book-400 hover:text-book-800 mt-1"><i class="ph ph-x text-xl"></i></button>
+                <button onclick="window.closeModal('tx-detail-modal')" class="text-book-400 hover:text-book-800 mt-1"><i class="ph ph-x text-xl"></i></button>
             </div>
             <div class="p-6 space-y-6 flex-1">
                 <div class="grid grid-cols-2 gap-4 text-sm">
@@ -420,16 +226,15 @@
                 </div>
                 <div><h4 class="text-sm font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-2">參與者分攤明細</h4><div id="tx-detail-buyers-list" class="space-y-2"></div></div>
             </div>
-            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end"><button onclick="closeModal('tx-detail-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100 transition-colors">關閉</button></div>
+            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end"><button onclick="window.closeModal('tx-detail-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100 transition-colors">關閉</button></div>
         </div>
     </div>
 
-    <!-- 個人專屬帳戶明細 -->
     <div id="user-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden border border-book-200 my-8 flex flex-col h-[85vh]">
             <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10 shadow-sm">
                 <div class="flex items-center gap-3"><div id="user-detail-avatar" class="w-10 h-10 rounded-full bg-book-900 text-white flex items-center justify-center font-serif font-bold text-lg shadow-inner"></div><h3 class="text-xl font-serif font-bold text-book-900"><span id="user-detail-name"></span> 的專屬帳房</h3></div>
-                <button onclick="closeModal('user-detail-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+                <button onclick="window.closeModal('user-detail-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
             </div>
             <div class="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -456,7 +261,7 @@
     <!-- 資料匯入 (CSV) -->
     <div id="backup-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-book-200">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center"><h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2"><i class="ph ph-database text-book-600"></i> 資料批次匯入設定</h3><button onclick="closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
+            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center"><h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2"><i class="ph ph-database text-book-600"></i> 資料批次匯入設定</h3><button onclick="window.closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
             <div class="p-6 space-y-6">
                 <div class="bg-emerald-50 p-5 rounded-lg border border-emerald-200">
                     <h4 class="font-bold text-emerald-900 mb-2 flex items-center gap-2"><i class="ph-fill ph-file-csv text-xl"></i> 📂 批次匯入 CSV</h4>
@@ -471,9 +276,78 @@
         </div>
     </div>
 
-    <!-- 腳本邏輯區 -->
     <script>
         const users = ['心綺', '心薇', '欣璇', '阿澧'];
+
+        // 將變數正確掛載到 window，避免在計算時抓不到資料而當機！
+        window.recordsData = [];
+        window.paymentsData = [];
+        window.currentEditingId = null;
+        window.isCloudConnected = false;
+
+        const DB_URL = `https://boolhepler-default-rtdb.asia-southeast1.firebasedatabase.app/rooms`;
+        let roomId = window.location.hostname.replace(/\./g, '_');
+        if (!roomId || roomId === 'localhost' || window.location.protocol === 'file:') roomId = 'local_test_room';
+        const ROOM_URL = `${DB_URL}/${roomId}`;
+
+        setInterval(fetchDataFromCloud, 3000);
+
+        async function fetchDataFromCloud() {
+            try {
+                const res = await fetch(`${ROOM_URL}.json`);
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                
+                window.isCloudConnected = true;
+                const statusEl = document.getElementById('cloud-status');
+                if(statusEl && statusEl.innerHTML.includes('連線中')) {
+                    statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
+                }
+
+                let newRecords = [];
+                if (data && data.records) {
+                    for (let key in data.records) { newRecords.push({ fbId: key, ...data.records[key] }); }
+                }
+                window.recordsData = newRecords.sort((a,b) => b.id - a.id);
+
+                let newPayments = [];
+                if (data && data.payments) {
+                    for (let key in data.payments) { newPayments.push({ fbId: key, ...data.payments[key] }); }
+                }
+                window.paymentsData = newPayments.sort((a,b) => b.id - a.id);
+
+                if(window.renderDashboard) window.renderDashboard();
+                if(window.renderRecords) window.renderRecords();
+                if(!document.getElementById('payment-history-modal').classList.contains('hidden') && window.renderPaymentHistory) {
+                    window.renderPaymentHistory();
+                }
+            } catch (err) {
+                window.isCloudConnected = false;
+                const statusEl = document.getElementById('cloud-status');
+                if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-hard-drive text-amber-500 text-lg"></i> <span class="text-amber-700 font-medium">連線異常或規則未開放</span>';
+            }
+        }
+
+        window.fbAddRecord = async function(record) {
+            await fetch(`${ROOM_URL}/records.json`, { method: 'POST', body: JSON.stringify(record) });
+            await fetchDataFromCloud();
+        }
+        window.fbUpdateRecord = async function(fbId, record) {
+            await fetch(`${ROOM_URL}/records/${fbId}.json`, { method: 'PUT', body: JSON.stringify(record) });
+            await fetchDataFromCloud();
+        }
+        window.fbDeleteRecord = async function(fbId) {
+            await fetch(`${ROOM_URL}/records/${fbId}.json`, { method: 'DELETE' });
+            await fetchDataFromCloud();
+        }
+        window.fbAddPayment = async function(payment) {
+            await fetch(`${ROOM_URL}/payments.json`, { method: 'POST', body: JSON.stringify(payment) });
+            await fetchDataFromCloud();
+        }
+        window.fbDeletePayment = async function(fbId) {
+            await fetch(`${ROOM_URL}/payments/${fbId}.json`, { method: 'DELETE' });
+            await fetchDataFromCloud();
+        }
 
         function initUI() {
             const today = new Date().toISOString().split('T')[0];
@@ -496,12 +370,16 @@
             `).join('');
             
             setupCSVUploader();
+            fetchDataFromCloud(); 
         }
         window.addEventListener('DOMContentLoaded', initUI);
 
         window.switchTab = function(tabId) {
             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('border-book-900', 'text-book-900'); el.classList.add('border-transparent', 'text-book-300'); });
+            document.querySelectorAll('.tab-btn').forEach(el => {
+                el.classList.remove('border-book-900', 'text-book-900');
+                el.classList.add('border-transparent', 'text-book-300');
+            });
             document.getElementById(`view-${tabId}`).classList.remove('hidden');
             const activeBtn = document.getElementById(`tab-${tabId}`);
             activeBtn.classList.remove('border-transparent', 'text-book-300');
@@ -573,7 +451,10 @@
             const lines = parseCSVText(text);
             const batchDate = document.getElementById('csv-import-date').value;
             const batchPayer = document.getElementById('csv-import-payer').value;
-            let newRecords = []; let importedCount = 0;
+            let importedCount = 0;
+
+            if(!confirm(`準備解析檔案...\n請注意：因為目前是即時雲端模式，匯入的資料將會逐筆同步至雲端。`)) return;
+            document.getElementById('cloud-status').innerHTML = '<i class="ph-bold ph-spinner animate-spin text-blue-500"></i> 上傳資料中...';
 
             for (let i = 0; i < lines.length; i++) {
                 const row = lines[i];
@@ -581,7 +462,7 @@
                 const title = row[0];
                 if (!title || title.includes('書名') || title.includes('總計') || title.includes('平均') || title.includes('點數') || title.includes('總價')) continue;
 
-                let priceRaw = row[1].trim();
+                let priceRaw = row[1] ? row[1].trim() : '';
                 let price = priceRaw === '' ? 0 : parseFloat(priceRaw);
                 if (isNaN(price) || price < 0) price = 0; 
                 
@@ -597,212 +478,236 @@
                     let perPersonCash = price > 0 ? (price / buyers.length) : 0;
                     let perPersonPointsEarned = price === 0 ? (pointsEarned / buyers.length) : 0;
                     
-                    newRecords.push({
+                    let rec = {
                         id: Date.now() + importedCount, 
                         date: batchDate, title: title, payer: finalPayer, price: price,
                         pointsUsed: 0, pointsEarned: pointsEarned, buyers: buyers,
                         perPersonCash: perPersonCash, perPersonPointsEarned: perPersonPointsEarned
-                    });
+                    };
+                    
+                    await fetch(`${ROOM_URL}/records.json`, { method: 'POST', body: JSON.stringify(rec) });
                     importedCount++;
                 }
             }
 
-            if (importedCount > 0) {
-                if(confirm(`成功解析出 ${importedCount} 筆紀錄！\n若已開啟雲端共用，匯入後將直接發布至雲端。\n確定要匯入嗎？`)) {
-                    await window.fbImportData(newRecords, []);
-                    closeModal('backup-modal');
-                    alert("匯入完成！");
-                }
-            } else { alert('無法從檔案中找到有效的購書紀錄。'); }
+            document.getElementById('cloud-status').innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
+            await fetchDataFromCloud();
+            window.closeModal('backup-modal');
+            alert(`匯入完成！成功新增 ${importedCount} 筆資料至雲端！`);
         }
 
         window.renderDashboard = function() {
-            let totalPoints = 0;
-            let accounts = {};
-            users.forEach(u => accounts[u] = { expense: 0, paid: 0, points: 0, settledSent: 0, settledRecv: 0 });
+            try {
+                let totalPoints = 0;
+                let accounts = {};
+                users.forEach(u => accounts[u] = { expense: 0, paid: 0, points: 0, settledSent: 0, settledRecv: 0 });
 
-            window.recordsData.forEach(record => {
-                totalPoints += (record.pointsEarned || 0); totalPoints -= (record.pointsUsed || 0);
-                if (record.payer && accounts[record.payer]) accounts[record.payer].paid += (record.price || 0);
-                if (record.buyers && record.buyers.length > 0) {
-                    record.buyers.forEach(buyer => {
-                        if (accounts[buyer]) {
-                            accounts[buyer].expense += (record.perPersonCash || 0);
-                            accounts[buyer].points += (record.perPersonPointsEarned || 0);
-                        }
-                    });
+                window.recordsData.forEach(record => {
+                    const pointsEarned = Number(record.pointsEarned) || 0;
+                    const pointsUsed = Number(record.pointsUsed) || 0;
+                    const price = Number(record.price) || 0;
+                    const perPersonCash = Number(record.perPersonCash) || 0;
+                    const perPersonPointsEarned = Number(record.perPersonPointsEarned) || 0;
+                    
+                    totalPoints += pointsEarned; 
+                    totalPoints -= pointsUsed;
+                    if (record.payer && accounts[record.payer]) accounts[record.payer].paid += price;
+                    
+                    const buyers = Array.isArray(record.buyers) ? record.buyers : (record.buyers ? [record.buyers] : []);
+                    if (buyers.length > 0) {
+                        buyers.forEach(buyer => {
+                            if (accounts[buyer]) {
+                                accounts[buyer].expense += perPersonCash;
+                                accounts[buyer].points += perPersonPointsEarned;
+                            }
+                        });
+                    }
+                });
+                document.getElementById('dash-total-points').innerText = totalPoints.toFixed(2);
+
+                window.paymentsData.forEach(payment => {
+                    const amount = Number(payment.amount) || 0;
+                    if (accounts[payment.from]) accounts[payment.from].settledSent += amount;
+                    if (accounts[payment.to]) accounts[payment.to].settledRecv += amount;
+                });
+
+                let balances = {};
+                users.forEach(u => balances[u] = (accounts[u].paid + accounts[u].settledSent) - (accounts[u].expense + accounts[u].settledRecv));
+
+                let debtors = [], creditors = [];
+                for (let user in balances) {
+                    if (balances[user] < -0.01) debtors.push({ name: user, amount: -balances[user] });
+                    else if (balances[user] > 0.01) creditors.push({ name: user, amount: balances[user] });
                 }
-            });
-            document.getElementById('dash-total-points').innerText = totalPoints.toFixed(2);
+                debtors.sort((a, b) => b.amount - a.amount);
+                creditors.sort((a, b) => b.amount - a.amount);
 
-            window.paymentsData.forEach(payment => {
-                if (accounts[payment.from]) accounts[payment.from].settledSent += payment.amount;
-                if (accounts[payment.to]) accounts[payment.to].settledRecv += payment.amount;
-            });
+                let transfers = [];
+                let dIndex = 0, cIndex = 0;
+                while (dIndex < debtors.length && cIndex < creditors.length) {
+                    let debtor = debtors[dIndex]; let creditor = creditors[cIndex];
+                    let amountToTransfer = Math.min(debtor.amount, creditor.amount);
+                    if (amountToTransfer > 0.01) transfers.push({ from: debtor.name, to: creditor.name, amount: amountToTransfer });
+                    debtor.amount -= amountToTransfer; creditor.amount -= amountToTransfer;
+                    if (debtor.amount < 0.01) dIndex++; if (creditor.amount < 0.01) cIndex++;
+                }
 
-            let balances = {};
-            users.forEach(u => balances[u] = (accounts[u].paid + accounts[u].settledSent) - (accounts[u].expense + accounts[u].settledRecv));
-
-            let debtors = [], creditors = [];
-            for (let user in balances) {
-                if (balances[user] < -0.01) debtors.push({ name: user, amount: -balances[user] });
-                else if (balances[user] > 0.01) creditors.push({ name: user, amount: balances[user] });
-            }
-            debtors.sort((a, b) => b.amount - a.amount);
-            creditors.sort((a, b) => b.amount - a.amount);
-
-            let transfers = [];
-            let dIndex = 0, cIndex = 0;
-            while (dIndex < debtors.length && cIndex < creditors.length) {
-                let debtor = debtors[dIndex]; let creditor = creditors[cIndex];
-                let amountToTransfer = Math.min(debtor.amount, creditor.amount);
-                if (amountToTransfer > 0.01) transfers.push({ from: debtor.name, to: creditor.name, amount: amountToTransfer });
-                debtor.amount -= amountToTransfer; creditor.amount -= amountToTransfer;
-                if (debtor.amount < 0.01) dIndex++; if (creditor.amount < 0.01) cIndex++;
-            }
-
-            const settlementContainer = document.getElementById('settlement-results');
-            if (transfers.length === 0) {
-                settlementContainer.innerHTML = `<p class="text-book-600 text-center py-4 flex items-center justify-center gap-2"><i class="ph ph-check-circle text-emerald-600 text-xl"></i> 目前所有帳目已結清，無須轉帳！</p>`;
-            } else {
-                settlementContainer.innerHTML = transfers.map(t => `
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-book-50 rounded-lg border border-book-100 gap-3">
-                        <div class="flex items-center gap-3">
-                            <span class="text-book-900">${t.from}</span>
-                            <i class="ph ph-arrow-right text-book-300"></i>
-                            <span class="text-book-900">${t.to}</span>
-                            <span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">應付 $${t.amount.toFixed(2)}</span>
+                const settlementContainer = document.getElementById('settlement-results');
+                if (transfers.length === 0) {
+                    settlementContainer.innerHTML = `<p class="text-book-600 text-center py-4 flex items-center justify-center gap-2"><i class="ph ph-check-circle text-emerald-600 text-xl"></i> 目前所有帳目已結清，無須轉帳！</p>`;
+                } else {
+                    settlementContainer.innerHTML = transfers.map(t => `
+                        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-book-50 rounded-lg border border-book-100 gap-3">
+                            <div class="flex items-center gap-3">
+                                <span class="text-book-900">${t.from}</span>
+                                <i class="ph ph-arrow-right text-book-300"></i>
+                                <span class="text-book-900">${t.to}</span>
+                                <span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">應付 $${t.amount.toFixed(2)}</span>
+                            </div>
+                            <button onclick="window.openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
+                                <i class="ph ph-money"></i> 紀錄部分/全額還款
+                            </button>
                         </div>
-                        <button onclick="window.openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
-                            <i class="ph ph-money"></i> 紀錄部分/全額還款
-                        </button>
-                    </div>
-                `).join('');
-            }
+                    `).join('');
+                }
 
-            const grid = document.getElementById('dashboard-users-grid');
-            grid.innerHTML = users.map(user => {
-                const acc = accounts[user]; const bal = balances[user];
-                let statusHtml = '';
-                if (bal > 0.01) statusHtml = `<span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">應收回 $${bal.toFixed(2)}</span>`;
-                else if (bal < -0.01) statusHtml = `<span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100">需支付 $${Math.abs(bal).toFixed(2)}</span>`;
-                else statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
-
-                return `
-                <div onclick="window.viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
-                    <div class="p-4 border-b border-book-100 flex items-center justify-between bg-book-50/50 group-hover:bg-book-100/50 transition-colors">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">${user.charAt(0)}</div>
-                            <h3 class="font-serif font-bold text-book-900 text-lg">${user}</h3>
-                        </div>
-                        ${statusHtml}
-                    </div>
-                    <div class="p-4 flex flex-col gap-3 text-sm">
-                        <div class="flex justify-between items-center text-book-800"><span>共消費</span><span class="font-mono font-bold">$${(acc.expense||0).toFixed(2)}</span></div>
-                        <div class="flex justify-between items-center text-book-800"><span>已代墊</span><span class="font-mono font-bold">$${(acc.paid||0).toFixed(2)}</span></div>
-                        <div class="h-px w-full bg-book-100 my-1"></div>
-                        <div class="flex justify-between items-center"><span class="text-book-600 font-medium">個人獲得點數</span><span class="font-mono font-bold text-emerald-600">+${(acc.points||0).toFixed(2)} Pts</span></div>
-                    </div>
-                </div>`;
-            }).join('');
-
-            const leaderboardContainer = document.getElementById('leaderboard-container');
-            const sortedUsers = [...users].sort((a, b) => accounts[b].expense - accounts[a].expense);
-            const maxExpense = Math.max(...sortedUsers.map(u => accounts[u].expense), 1);
-
-            if (maxExpense === 1 && sortedUsers[0].expense === 0) {
-                leaderboardContainer.innerHTML = `<p class="text-book-400 text-center py-4 font-serif italic">目前大家的心如止水，尚未有任何購書紀錄。</p>`;
-            } else {
-                leaderboardContainer.innerHTML = sortedUsers.map((user, index) => {
-                    const exp = accounts[user].expense; const percentage = (exp / maxExpense) * 100;
-                    let rankIcon = index === 0 ? '<i class="ph-fill ph-medal text-yellow-500 text-3xl drop-shadow-sm"></i>' : 
-                                   index === 1 ? '<i class="ph-fill ph-medal text-slate-400 text-3xl drop-shadow-sm"></i>' : 
-                                   index === 2 ? '<i class="ph-fill ph-medal text-amber-700 text-3xl drop-shadow-sm"></i>' : 
-                                   `<span class="w-8 text-center font-bold text-book-400 font-serif text-lg">${index + 1}</span>`;
+                const grid = document.getElementById('dashboard-users-grid');
+                grid.innerHTML = users.map(user => {
+                    const acc = accounts[user]; const bal = balances[user];
+                    let statusHtml = '';
+                    if (bal > 0.01) statusHtml = `<span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">應收回 $${bal.toFixed(2)}</span>`;
+                    else if (bal < -0.01) statusHtml = `<span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100">需支付 $${Math.abs(bal).toFixed(2)}</span>`;
+                    else statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
 
                     return `
-                    <div class="flex items-center gap-3 sm:gap-4 group">
-                        <div class="flex-shrink-0 w-10 flex justify-center">${rankIcon}</div>
-                        <div class="font-serif font-bold text-book-900 w-12 text-lg">${user}</div>
-                        <div class="flex-grow h-4 bg-book-100 rounded-full overflow-hidden shadow-inner">
-                            <div class="h-full bg-book-600 rounded-full transition-all duration-1000 ease-out relative overflow-hidden" style="width: ${percentage}%"><div class="absolute inset-0 bg-white/20 w-full h-full transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div></div>
+                    <div onclick="window.viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
+                        <div class="p-4 border-b border-book-100 flex items-center justify-between bg-book-50/50 group-hover:bg-book-100/50 transition-colors">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">${user.charAt(0)}</div>
+                                <h3 class="font-serif font-bold text-book-900 text-lg">${user}</h3>
+                            </div>
+                            ${statusHtml}
                         </div>
-                        <div class="w-24 text-right font-mono font-bold text-book-900 text-lg">$${(exp||0).toFixed(2)}</div>
+                        <div class="p-4 flex flex-col gap-3 text-sm">
+                            <div class="flex justify-between items-center text-book-800"><span>共消費</span><span class="font-mono font-bold">$${(acc.expense||0).toFixed(2)}</span></div>
+                            <div class="flex justify-between items-center text-book-800"><span>已代墊</span><span class="font-mono font-bold">$${(acc.paid||0).toFixed(2)}</span></div>
+                            <div class="h-px w-full bg-book-100 my-1"></div>
+                            <div class="flex justify-between items-center"><span class="text-book-600 font-medium">個人獲得點數</span><span class="font-mono font-bold text-emerald-600">+${(acc.points||0).toFixed(2)} Pts</span></div>
+                        </div>
                     </div>`;
                 }).join('');
-            }
+
+                const leaderboardContainer = document.getElementById('leaderboard-container');
+                const sortedUsers = [...users].sort((a, b) => accounts[b].expense - accounts[a].expense);
+                const maxExpense = Math.max(...sortedUsers.map(u => accounts[u].expense), 1);
+
+                if (maxExpense === 1 && sortedUsers[0].expense === 0) {
+                    leaderboardContainer.innerHTML = `<p class="text-book-400 text-center py-4 font-serif italic">目前大家的心如止水，尚未有任何購書紀錄。</p>`;
+                } else {
+                    leaderboardContainer.innerHTML = sortedUsers.map((user, index) => {
+                        const exp = accounts[user].expense; const percentage = (exp / maxExpense) * 100;
+                        let rankIcon = index === 0 ? '<i class="ph-fill ph-medal text-yellow-500 text-3xl drop-shadow-sm"></i>' : 
+                                       index === 1 ? '<i class="ph-fill ph-medal text-slate-400 text-3xl drop-shadow-sm"></i>' : 
+                                       index === 2 ? '<i class="ph-fill ph-medal text-amber-700 text-3xl drop-shadow-sm"></i>' : 
+                                       `<span class="w-8 text-center font-bold text-book-400 font-serif text-lg">${index + 1}</span>`;
+
+                        return `
+                        <div class="flex items-center gap-3 sm:gap-4 group">
+                            <div class="flex-shrink-0 w-10 flex justify-center">${rankIcon}</div>
+                            <div class="font-serif font-bold text-book-900 w-12 text-lg">${user}</div>
+                            <div class="flex-grow h-4 bg-book-100 rounded-full overflow-hidden shadow-inner">
+                                <div class="h-full bg-book-600 rounded-full transition-all duration-1000 ease-out relative overflow-hidden" style="width: ${percentage}%"><div class="absolute inset-0 bg-white/20 w-full h-full transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div></div>
+                            </div>
+                            <div class="w-24 text-right font-mono font-bold text-book-900 text-lg">$${(exp||0).toFixed(2)}</div>
+                        </div>`;
+                    }).join('');
+                }
+            } catch (e) {}
         }
 
         window.renderRecords = function() {
-            const tbody = document.getElementById('records-table-body');
-            const searchInput = document.getElementById('filter-search');
-            const searchKeyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
-            const startDate = document.getElementById('filter-start').value;
-            const endDate = document.getElementById('filter-end').value;
+            try {
+                const tbody = document.getElementById('records-table-body');
+                const searchInput = document.getElementById('filter-search');
+                const searchKeyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
+                const startDate = document.getElementById('filter-start').value;
+                const endDate = document.getElementById('filter-end').value;
 
-            let filteredRecords = [...window.recordsData];
-            
-            // 關鍵字搜尋過濾 (加上安全防護)
-            if (searchKeyword) {
-                filteredRecords = filteredRecords.filter(r => (r.title || '').toString().toLowerCase().includes(searchKeyword));
-            }
-            if (startDate) filteredRecords = filteredRecords.filter(r => r.date >= startDate);
-            if (endDate) filteredRecords = filteredRecords.filter(r => r.date <= endDate);
-
-            if (filteredRecords.length === 0) {
-                const message = window.recordsData.length === 0 ? "尚無任何紀錄，點擊右上角新增吧！" : "此區間或關鍵字查無紀錄。";
-                tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-12 text-center text-book-300 font-serif italic">${message}</td></tr>`;
-                return;
-            }
-
-            const sortedRecords = filteredRecords.sort((a,b) => new Date(b.date) - new Date(a.date));
-
-            tbody.innerHTML = sortedRecords.map(record => {
-                const isOnlyPoints = record.price === 0 && record.pointsEarned > 0;
+                let filteredRecords = [...window.recordsData];
                 
-                // 關鍵字高光標記 (加上安全防護)
-                let displayTitle = record.title || '';
-                if (searchKeyword && displayTitle) {
-                    const regex = new RegExp(`(${searchKeyword})`, "gi");
-                    displayTitle = displayTitle.toString().replace(regex, `<mark class="bg-yellow-200 text-book-900 rounded px-0.5">$1</mark>`);
+                if (searchKeyword) {
+                    filteredRecords = filteredRecords.filter(r => (r.title || '').toString().toLowerCase().includes(searchKeyword));
                 }
-                
-                // 防護網：確保 buyers 是陣列
-                const buyers = record.buyers || [];
+                if (startDate) filteredRecords = filteredRecords.filter(r => r.date >= startDate);
+                if (endDate) filteredRecords = filteredRecords.filter(r => r.date <= endDate);
 
-                return `
-                <tr onclick="window.viewTransactionDetail('${record.fbId}', ${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-book-600">${record.date || ''}</td>
-                    <td class="px-4 py-3 text-sm font-serif font-bold text-book-900">${displayTitle}${isOnlyPoints ? `<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>` : ''}</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${record.payer}</span>` : '-'}</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${(record.price || 0).toFixed(2)}</div>${(record.pointsUsed || 0) > 0 ? `<div class="text-xs text-red-500 mt-0.5">- ${(record.pointsUsed || 0).toFixed(2)} 點</div>` : ''}</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-emerald-600 font-bold">${(record.pointsEarned || 0) > 0 ? `+${(record.pointsEarned || 0).toFixed(2)}` : '-'}</td>
-                    <td class="px-4 py-3 text-sm text-book-800"><div class="flex flex-wrap gap-1">${buyers.length > 0 ? buyers.map(b => `<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">${b}</span>`).join('') : '-'}</div></td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${(record.perPersonCash || 0).toFixed(2)}</div>${(record.perPersonPointsEarned || 0) > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${(record.perPersonPointsEarned || 0).toFixed(2)} 點</div>` : ''}</td>
-                    <td class="px-4 py-3 whitespace-nowrap text-center">
-                        <button onclick="event.stopPropagation(); window.editRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
-                        <button onclick="event.stopPropagation(); if(confirm('確定要刪除嗎？')) window.fbDeleteRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
-                    </td>
-                </tr>`;
-            }).join('');
+                if (filteredRecords.length === 0) {
+                    const message = window.recordsData.length === 0 ? "尚無任何紀錄，點擊右上角新增吧！" : "此區間或關鍵字查無紀錄。";
+                    tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-12 text-center text-book-300 font-serif italic">${message}</td></tr>`;
+                    return;
+                }
+
+                const sortedRecords = filteredRecords.sort((a,b) => {
+                    const dateA = new Date(a.date).getTime() || 0;
+                    const dateB = new Date(b.date).getTime() || 0;
+                    return dateB - dateA;
+                });
+
+                tbody.innerHTML = sortedRecords.map(record => {
+                    try {
+                        const price = Number(record.price) || 0;
+                        const pointsUsed = Number(record.pointsUsed) || 0;
+                        const pointsEarned = Number(record.pointsEarned) || 0;
+                        const perPersonCash = Number(record.perPersonCash) || 0;
+                        const perPersonPointsEarned = Number(record.perPersonPointsEarned) || 0;
+                        
+                        const isOnlyPoints = price === 0 && pointsEarned > 0;
+                        
+                        let displayTitle = (record.title || '').toString();
+                        if (searchKeyword && displayTitle) {
+                            const safeKeyword = searchKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const regex = new RegExp(`(${safeKeyword})`, "gi");
+                            displayTitle = displayTitle.replace(regex, `<mark class="bg-yellow-200 text-book-900 rounded px-0.5">$1</mark>`);
+                        }
+                        
+                        const buyers = Array.isArray(record.buyers) ? record.buyers : (record.buyers ? [record.buyers] : []);
+
+                        return `
+                        <tr onclick="window.viewTransactionDetail('${record.fbId}', ${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-book-600">${record.date || ''}</td>
+                            <td class="px-4 py-3 text-sm font-serif font-bold text-book-900">${displayTitle}${isOnlyPoints ? '<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>' : ''}</td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">${record.payer ? '<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">' + record.payer + '</span>' : '-'}</td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${price.toFixed(2)}</div>${pointsUsed > 0 ? '<div class="text-xs text-red-500 mt-0.5">- ' + pointsUsed.toFixed(2) + ' 點</div>' : ''}</td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-emerald-600 font-bold">${pointsEarned > 0 ? '+' + pointsEarned.toFixed(2) : '-'}</td>
+                            <td class="px-4 py-3 text-sm text-book-800"><div class="flex flex-wrap gap-1">${buyers.length > 0 ? buyers.map(b => '<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">' + (b||'') + '</span>').join('') : '-'}</div></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${perPersonCash.toFixed(2)}</div>${perPersonPointsEarned > 0 ? '<div class="text-xs text-emerald-500 mt-0.5">+ ' + perPersonPointsEarned.toFixed(2) + ' 點</div>' : ''}</td>
+                            <td class="px-4 py-3 whitespace-nowrap text-center">
+                                <button onclick="event.stopPropagation(); window.editRecord('${record.fbId}')" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+                                <button onclick="event.stopPropagation(); if(confirm('確定要刪除嗎？')) window.fbDeleteRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
+                            </td>
+                        </tr>`;
+                    } catch (rowErr) {
+                        return `<tr><td colspan="8" class="px-4 py-3 text-red-500 text-xs text-center border-b border-book-50">⚠️ 渲染此筆資料失敗，請重新刪除/新增此筆</td></tr>`;
+                    }
+                }).join('');
+            } catch(e) { }
         }
 
-        window.editRecord = function(fbId, localId) {
-            const idToSearch = window.isCloudConnected ? fbId : localId;
-            const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
+        window.editRecord = function(fbId) {
+            const record = window.recordsData.find(r => r.fbId === fbId);
             if (!record) return;
 
-            window.currentEditingId = idToSearch; 
+            window.currentEditingId = fbId; 
             window.openModal('transaction-modal', true);
             document.getElementById('modal-title').innerText = '編輯帳目紀錄';
-            document.getElementById('trans-date').value = record.date;
+            document.getElementById('trans-date').value = record.date || '';
             document.getElementById('trans-payer').value = record.payer || users[0];
             document.getElementById('trans-title').value = record.title || '';
             document.getElementById('trans-price').value = record.price || 0;
             document.getElementById('trans-points-used').value = record.pointsUsed || 0;
             document.getElementById('trans-points-earned').value = record.pointsEarned || 0;
 
-            const buyers = record.buyers || [];
+            const buyers = Array.isArray(record.buyers) ? record.buyers : (record.buyers ? [record.buyers] : []);
             document.querySelectorAll('.trans-buyer-cb').forEach(cb => { cb.checked = buyers.includes(cb.value); });
         }
 
@@ -828,10 +733,9 @@
             let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
             let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
             
-            // 修復：編輯時保持原本的 id，以免資料跑到最上面
             let existingId = Date.now();
             if (window.currentEditingId) {
-                const oldRec = window.recordsData.find(r => r.fbId === window.currentEditingId || r.id === window.currentEditingId);
+                const oldRec = window.recordsData.find(r => r.fbId === window.currentEditingId);
                 if (oldRec && oldRec.id) existingId = oldRec.id;
             }
 
@@ -846,8 +750,8 @@
                 } else {
                     await window.fbAddRecord(newRecord);
                 }
-                closeModal('transaction-modal');
-            } catch (err) { alert("操作失敗"); console.error(err); }
+                window.closeModal('transaction-modal');
+            } catch (err) { alert("操作失敗"); }
             btn.disabled = false; btn.innerText = "儲存紀錄";
         });
 
@@ -874,7 +778,7 @@
 
             try {
                 await window.fbAddPayment({ id: Date.now(), date, from, to, amount });
-                closeModal('settle-modal');
+                window.closeModal('settle-modal');
             } catch (err) { alert("標記失敗"); }
             btn.disabled = false; btn.innerText="確認標記";
         });
@@ -890,7 +794,7 @@
                 <tr class="hover:bg-book-50/50">
                     <td class="px-4 py-3 text-book-600">${p.date}</td>
                     <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="text-book-900">${p.from}</span><i class="ph ph-arrow-right text-emerald-600"></i><span class="text-book-900">${p.to}</span></div></td>
-                    <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${(p.amount||0).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${(Number(p.amount)||0).toFixed(2)}</td>
                     <td class="px-4 py-3 text-center"><button onclick="if(confirm('確定要刪除這筆還款紀錄嗎？')) window.fbDeletePayment('${p.fbId}', ${p.id})" class="text-book-400 hover:text-red-500 p-1"><i class="ph-fill ph-trash text-lg"></i></button></td>
                 </tr>
             `).join('');
@@ -901,24 +805,24 @@
             const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
             if (!record) return;
 
-            const buyers = record.buyers || [];
+            const buyers = Array.isArray(record.buyers) ? record.buyers : (record.buyers ? [record.buyers] : []);
 
             document.getElementById('tx-detail-date').innerText = record.date || '';
             document.getElementById('tx-detail-title').innerText = record.title || '';
             document.getElementById('tx-detail-payer').innerText = record.payer ? record.payer : '無 (純點數)';
             document.getElementById('tx-detail-buyer-count').innerText = `${buyers.length} 人`;
-            document.getElementById('tx-detail-price').innerText = `$${(record.price||0).toFixed(2)}`;
-            document.getElementById('tx-detail-points-used').innerText = (record.pointsUsed||0) > 0 ? `- ${(record.pointsUsed).toFixed(2)}` : '0';
-            document.getElementById('tx-detail-points-earned').innerText = (record.pointsEarned||0) > 0 ? `+ ${(record.pointsEarned).toFixed(2)}` : '0';
-            const actualCash = Math.max(0, (record.price||0) - (record.pointsUsed||0));
+            document.getElementById('tx-detail-price').innerText = `$${(Number(record.price)||0).toFixed(2)}`;
+            document.getElementById('tx-detail-points-used').innerText = (Number(record.pointsUsed)||0) > 0 ? `- ${(Number(record.pointsUsed)||0).toFixed(2)}` : '0';
+            document.getElementById('tx-detail-points-earned').innerText = (Number(record.pointsEarned)||0) > 0 ? `+ ${(Number(record.pointsEarned)||0).toFixed(2)}` : '0';
+            const actualCash = Math.max(0, (Number(record.price)||0) - (Number(record.pointsUsed)||0));
             document.getElementById('tx-detail-actual-cash').innerText = `$${actualCash.toFixed(2)}`;
 
             const buyersListHtml = buyers.map(b => `
                 <div class="flex justify-between items-center bg-white p-3 border border-book-100 rounded-lg">
                     <span class="font-bold text-book-800">${b}</span>
                     <div class="text-right">
-                        <div class="font-mono font-bold text-book-900">$${(record.perPersonCash||0).toFixed(2)}</div>
-                        ${(record.perPersonPointsEarned||0) > 0 ? `<div class="text-xs text-emerald-600">+ ${(record.perPersonPointsEarned).toFixed(2)} Pts</div>` : ''}
+                        <div class="font-mono font-bold text-book-900">$${(Number(record.perPersonCash)||0).toFixed(2)}</div>
+                        ${(Number(record.perPersonPointsEarned)||0) > 0 ? `<div class="text-xs text-emerald-600">+ ${(Number(record.perPersonPointsEarned)||0).toFixed(2)} Pts</div>` : ''}
                     </div>
                 </div>
             `).join('');
@@ -932,15 +836,15 @@
             
             window.recordsData.forEach(r => {
                 const isPayer = r.payer === userName;
-                const buyers = r.buyers || [];
+                const buyers = Array.isArray(r.buyers) ? r.buyers : (r.buyers ? [r.buyers] : []);
                 const isBuyer = buyers.includes(userName);
-                if (isPayer) paid += (r.price || 0);
-                if (isBuyer) { expense += (r.perPersonCash || 0); points += (r.perPersonPointsEarned || 0); }
+                if (isPayer) paid += (Number(r.price) || 0);
+                if (isBuyer) { expense += (Number(r.perPersonCash) || 0); points += (Number(r.perPersonPointsEarned) || 0); }
                 if (isPayer || isBuyer) {
                     userHistory.push({
-                        type: 'book', date: r.date, timestamp: new Date(r.date||0).getTime() + ((r.price||0)*100), 
-                        title: r.title, isPayer, isBuyer, myExpense: isBuyer ? (r.perPersonCash||0) : 0,
-                        myPaid: isPayer ? (r.price||0) : 0, myPoints: isBuyer ? (r.perPersonPointsEarned||0) : 0
+                        type: 'book', date: r.date, timestamp: new Date(r.date||0).getTime() + ((Number(r.price)||0)*100), 
+                        title: r.title, isPayer, isBuyer, myExpense: isBuyer ? (Number(r.perPersonCash)||0) : 0,
+                        myPaid: isPayer ? (Number(r.price)||0) : 0, myPoints: isBuyer ? (Number(r.perPersonPointsEarned)||0) : 0
                     });
                 }
             });
@@ -948,13 +852,13 @@
             window.paymentsData.forEach(p => {
                 const isSender = p.from === userName;
                 const isReceiver = p.to === userName;
-                if (isSender) settledSent += (p.amount || 0);
-                if (isReceiver) settledRecv += (p.amount || 0);
+                if (isSender) settledSent += (Number(p.amount) || 0);
+                if (isReceiver) settledRecv += (Number(p.amount) || 0);
                 if (isSender || isReceiver) {
                     userHistory.push({
-                        type: 'payment', date: p.date, timestamp: new Date(p.date||0).getTime() + ((p.amount||0)*10),
+                        type: 'payment', date: p.date, timestamp: new Date(p.date||0).getTime() + ((Number(p.amount)||0)*10),
                         title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
-                        isSender, isReceiver, amount: (p.amount || 0)
+                        isSender, isReceiver, amount: (Number(p.amount) || 0)
                     });
                 }
             });
@@ -1006,6 +910,13 @@
             window.openModal('user-detail-modal');
         }
 
+        window.applyFilter = function() { window.renderRecords(); }
+        window.clearFilter = function() { 
+            document.getElementById('filter-search').value = '';
+            document.getElementById('filter-start').value = ''; 
+            document.getElementById('filter-end').value = ''; 
+            window.renderRecords(); 
+        }
     </script>
 </body>
 </html>
