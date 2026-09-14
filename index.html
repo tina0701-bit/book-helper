@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>書友結帳小幫手</title>
+    <title>書友結帳小幫手 (雲端同步版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
@@ -11,21 +11,8 @@
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
-                        serif: ['Noto Serif TC', 'serif'],
-                    },
-                    colors: {
-                        book: {
-                            50: '#F9F8F6',
-                            100: '#F2EFE9',
-                            200: '#E0D8CB',
-                            300: '#C9BB9F',
-                            600: '#8A7352',
-                            800: '#2C3E50',
-                            900: '#1A252F',
-                        }
-                    }
+                    fontFamily: { sans: ['Inter', 'Noto Sans TC', 'sans-serif'], serif: ['Noto Serif TC', 'serif'] },
+                    colors: { book: { 50: '#F9F8F6', 100: '#F2EFE9', 200: '#E0D8CB', 300: '#C9BB9F', 600: '#8A7352', 800: '#2C3E50', 900: '#1A252F' } }
                 }
             }
         }
@@ -34,10 +21,7 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .fade-in { animation: fadeIn 0.4s ease-out; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         button, label { transition: all 0.2s ease; }
     </style>
 </head>
@@ -45,13 +29,18 @@
 
     <header class="bg-white border-b border-book-200 sticky top-0 z-30 shadow-sm">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:h-16 gap-3">
                 <div class="flex items-center gap-3 text-book-900">
                     <i class="ph-fill ph-books text-2xl text-book-600"></i>
                     <span class="font-serif font-bold text-xl tracking-wide">書友帳房總覽</span>
+                    
+                    <!-- 雲端共用按鈕 -->
+                    <button id="share-btn" onclick="generateShareUrl()" class="ml-2 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded-full font-bold flex items-center gap-1 transition-colors">
+                        <i class="ph-bold ph-link"></i> 產生共用雲端網址
+                    </button>
                 </div>
-                <button onclick="openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm">
-                    <i class="ph ph-database text-lg"></i> <span class="hidden sm:inline">資料備份/匯入</span>
+                <button onclick="openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm self-start sm:self-auto">
+                    <i class="ph ph-database text-lg"></i> <span class="hidden sm:inline">資料備份與還原</span>
                 </button>
             </div>
             <nav class="flex space-x-8 overflow-x-auto no-scrollbar -mb-px bg-white" aria-label="Tabs">
@@ -63,11 +52,17 @@
                 </button>
             </nav>
         </div>
+        
+        <!-- 全域讀取進度條 -->
+        <div id="loading-bar" class="w-full bg-emerald-500 h-1 hidden"></div>
     </header>
 
     <main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 relative z-10">
         
+        <!-- 頁籤 1: 結帳總覽 Dashboard -->
         <div id="view-dashboard" class="view-section fade-in block">
+            
+            <!-- 共用點數卡片 -->
             <div class="bg-book-900 rounded-xl shadow-md p-6 mb-8 border-t-4 border-book-600 overflow-hidden relative">
                 <div class="flex flex-col relative z-10">
                     <p class="text-book-300 text-sm font-medium mb-1 tracking-widest font-sans">藏書閣共用點數餘額</p>
@@ -79,6 +74,7 @@
                 <i class="ph-fill ph-book-bookmark absolute -right-6 -bottom-8 text-[10rem] text-white opacity-5 pointer-events-none"></i>
             </div>
 
+            <!-- 自動結算 -->
             <div class="mb-8">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                     <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
@@ -93,6 +89,7 @@
                 </div>
             </div>
 
+            <!-- 個人帳戶總覽 -->
             <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center justify-between">
                 <span>個人帳戶明細</span>
                 <span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊卡片可查看個人紀錄</span>
@@ -109,6 +106,7 @@
             </div>
         </div>
 
+        <!-- 頁籤 2: 購書與點數紀錄 -->
         <div id="view-records" class="view-section fade-in hidden">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
@@ -208,7 +206,7 @@
                 </div>
                 <div class="pt-2 flex gap-3">
                     <button type="button" onclick="closeModal('transaction-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50 transition-colors">取消</button>
-                    <button type="submit" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button>
+                    <button type="submit" id="save-trans-btn" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button>
                 </div>
             </form>
         </div>
@@ -247,7 +245,7 @@
                 </div>
                 <div class="pt-4 flex gap-3">
                     <button type="button" onclick="closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button>
-                    <button type="submit" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button>
+                    <button type="submit" id="save-pay-btn" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button>
                 </div>
             </form>
         </div>
@@ -270,8 +268,7 @@
                             <th class="px-4 py-3 text-center text-xs font-medium text-book-500">操作</th>
                         </tr>
                     </thead>
-                    <tbody id="payment-history-body" class="divide-y divide-book-100 text-sm">
-                    </tbody>
+                    <tbody id="payment-history-body" class="divide-y divide-book-100 text-sm"></tbody>
                 </table>
             </div>
             <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
@@ -386,42 +383,17 @@
         </div>
     </div>
 
-    <!-- Modal: 資料備份與匯入 -->
+    <!-- Modal: 資料備份與還原 -->
     <div id="backup-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-book-200">
             <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
                 <h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2">
-                    <i class="ph ph-database text-book-600"></i> 資料備份與匯入設定
+                    <i class="ph ph-database text-book-600"></i> 資料備份與還原
                 </h3>
                 <button onclick="closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
             </div>
             <div class="p-6 space-y-6">
                 
-                <div class="bg-emerald-50 p-5 rounded-lg border border-emerald-200">
-                    <h4 class="font-bold text-emerald-900 mb-2 flex items-center gap-2">
-                        <i class="ph-fill ph-file-csv text-xl"></i> 📂 批次匯入 Book Walker 專用 CSV
-                    </h4>
-                    <p class="text-sm text-emerald-700 mb-4">系統會自動抓取您上傳的 CSV 中的「書名」、「活動價」以及「誰有買」。<br><strong class="text-emerald-900">✨ 新功能：若該行只有點數沒有金額，系統會自動判斷為純點數且不設定代墊人！</strong></p>
-                    
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label class="block text-xs font-medium text-emerald-800 mb-1">這批訂單的預設購買日期</label>
-                            <input type="date" id="csv-import-date" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-emerald-800 mb-1">預設代墊人 (有花錢才會算)</label>
-                            <select id="csv-import-payer" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white">
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-3">
-                        <input type="file" id="csv-upload-input" accept=".csv" class="block w-full text-sm text-emerald-800 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer border border-emerald-200 rounded-md bg-white">
-                    </div>
-                </div>
-
-                <hr class="border-book-200">
-
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="bg-white p-4 rounded-lg border border-book-200 flex flex-col justify-between">
                         <div>
@@ -448,26 +420,29 @@
         </div>
     </div>
 
+    <!-- 腳本邏輯區 -->
     <script>
-        // 固定使用者名單
         const users = ['心綺', '心薇', '欣璇', '阿澧'];
         
-        let recordsData = JSON.parse(localStorage.getItem('book_split_records_v3')) || [];
-        let paymentsData = JSON.parse(localStorage.getItem('book_split_payments_v1')) || [];
-        
+        let recordsData = [];
+        let paymentsData = [];
         let currentEditingId = null;
 
-        function init() {
+        // 雲端共用金鑰與 ID 獲取
+        const urlParams = new URLSearchParams(window.location.search);
+        let cloudBinId = urlParams.get('id');
+        const masterKey = "$2a$10$X1jT.8t.69L5.V73M0/2EebM6WwJ.3R.q/9w6A2z8G8yA8b2vM2yG"; 
+        const JSONBIN_URL = "https://api.jsonbin.io/v3/b";
+
+        async function init() {
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('trans-date').value = today;
             document.getElementById('payment-date').value = today;
-            document.getElementById('csv-import-date').value = today;
 
             const userOptions = users.map(user => `<option value="${user}">${user}</option>`).join('');
             document.getElementById('trans-payer').innerHTML = userOptions;
             document.getElementById('payment-from').innerHTML = userOptions;
             document.getElementById('payment-to').innerHTML = userOptions;
-            document.getElementById('csv-import-payer').innerHTML = userOptions;
 
             const checkboxContainer = document.getElementById('trans-buyers-checkboxes');
             checkboxContainer.innerHTML = users.map(user => `
@@ -477,8 +452,108 @@
                 </label>
             `).join('');
 
-            updateUI();
-            setupCSVUploader();
+            // 初始化時檢查是否有雲端 ID
+            if (cloudBinId) {
+                document.getElementById('share-btn').innerHTML = `<i class="ph-fill ph-cloud-check"></i> 已連接雲端`;
+                document.getElementById('share-btn').classList.replace('bg-emerald-100', 'bg-blue-100');
+                document.getElementById('share-btn').classList.replace('text-emerald-800', 'text-blue-800');
+                document.getElementById('share-btn').classList.replace('border-emerald-300', 'border-blue-300');
+                await loadFromCloud();
+            } else {
+                // 如果沒有雲端 ID，讀取本地，確保全新開始
+                recordsData = JSON.parse(localStorage.getItem('book_cloud_records_local_v2')) || [];
+                paymentsData = JSON.parse(localStorage.getItem('book_cloud_payments_local_v2')) || [];
+                updateUI(false); 
+            }
+        }
+
+        // --- 核心：雲端同步功能 (使用 JSONBin) ---
+        async function generateShareUrl() {
+            const btn = document.getElementById('share-btn');
+            btn.innerHTML = `<i class="ph-bold ph-spinner animate-spin"></i> 產生中...`;
+            document.getElementById('loading-bar').classList.remove('hidden');
+
+            const payload = { recordsData, paymentsData };
+
+            try {
+                let response;
+                if (cloudBinId) {
+                     response = await fetch(`${JSONBIN_URL}/${cloudBinId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                     response = await fetch(JSONBIN_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey, 'X-Bin-Name': 'BookSplitData_Fresh' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const data = await response.json();
+                cloudBinId = data.metadata.id;
+                
+                const newUrl = `${window.location.origin}${window.location.pathname}?id=${cloudBinId}`;
+                window.history.pushState({path:newUrl},'',newUrl);
+
+                navigator.clipboard.writeText(newUrl).then(() => {
+                    alert('🎉 全新帳本的雲端網址已產生並複製！\n請直接貼上這個網址給朋友們，大家都會同步看到最新的資料。');
+                });
+
+                btn.innerHTML = `<i class="ph-fill ph-cloud-check"></i> 點擊手動儲存同步`;
+                btn.classList.replace('bg-emerald-100', 'bg-blue-100');
+                btn.classList.replace('text-emerald-800', 'text-blue-800');
+                btn.classList.replace('border-emerald-300', 'border-blue-300');
+
+            } catch (error) {
+                console.error("雲端同步失敗", error);
+                alert("產生網址失敗，請稍後再試。");
+                btn.innerHTML = `<i class="ph-bold ph-link"></i> 產生共用雲端網址`;
+            }
+            document.getElementById('loading-bar').classList.add('hidden');
+        }
+
+        async function loadFromCloud() {
+            document.getElementById('loading-bar').classList.remove('hidden');
+            try {
+                const response = await fetch(`${JSONBIN_URL}/${cloudBinId}/latest`, {
+                    headers: { 'X-Master-Key': masterKey }
+                });
+                if (!response.ok) throw new Error('無法讀取雲端資料');
+                const result = await response.json();
+                
+                recordsData = result.record.recordsData || [];
+                paymentsData = result.record.paymentsData || [];
+                updateUI(false);
+            } catch (error) {
+                alert("載入雲端資料失敗，可能網址不正確。將切換回本地模式。");
+                console.error(error);
+            }
+            document.getElementById('loading-bar').classList.add('hidden');
+        }
+
+        function updateUI(autoSync = true) {
+            if (!cloudBinId) {
+                localStorage.setItem('book_cloud_records_local_v2', JSON.stringify(recordsData));
+                localStorage.setItem('book_cloud_payments_local_v2', JSON.stringify(paymentsData));
+            } else if (autoSync && cloudBinId) {
+                document.getElementById('loading-bar').classList.remove('hidden');
+                fetch(`${JSONBIN_URL}/${cloudBinId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey },
+                    body: JSON.stringify({ recordsData, paymentsData })
+                }).then(()=> { document.getElementById('loading-bar').classList.add('hidden'); })
+                  .catch(e => console.error("背景同步失敗", e));
+            }
+
+            renderDashboard();
+            renderRecords();
+            if(!document.getElementById('payment-history-modal').classList.contains('hidden')){
+                renderPaymentHistory();
+            }
         }
 
         function switchTab(tabId) {
@@ -487,7 +562,6 @@
                 el.classList.remove('border-book-900', 'text-book-900');
                 el.classList.add('border-transparent', 'text-book-300');
             });
-            
             document.getElementById(`view-${tabId}`).classList.remove('hidden');
             const activeBtn = document.getElementById(`tab-${tabId}`);
             activeBtn.classList.remove('border-transparent', 'text-book-300');
@@ -502,181 +576,14 @@
                 document.getElementById('add-transaction-form').reset();
                 document.getElementById('trans-date').value = new Date().toISOString().split('T')[0];
             }
-            if (modalId === 'payment-history-modal') {
-                renderPaymentHistory();
-            }
-            if (modalId === 'backup-modal') {
-                document.getElementById('import-textarea').value = ''; 
-                document.getElementById('csv-upload-input').value = '';
-            }
+            if (modalId === 'payment-history-modal') renderPaymentHistory();
+            if (modalId === 'backup-modal') document.getElementById('import-textarea').value = '';
         }
 
         function closeModal(modalId) {
              document.getElementById(modalId).classList.add('hidden');
-             if (modalId === 'transaction-modal') {
-                 document.getElementById('add-transaction-form').reset();
-                 currentEditingId = null; 
-             }
-             if (modalId === 'settle-modal') {
-                 document.getElementById('add-payment-form').reset();
-             }
-        }
-
-        function updateUI() {
-            localStorage.setItem('book_split_records_v3', JSON.stringify(recordsData));
-            localStorage.setItem('book_split_payments_v1', JSON.stringify(paymentsData));
-            renderDashboard();
-            renderRecords();
-            if(!document.getElementById('payment-history-modal').classList.contains('hidden')){
-                renderPaymentHistory();
-            }
-        }
-
-        // --- CSV 解析器 (升級版：判斷金錢與點數的獨立性) ---
-        function setupCSVUploader() {
-            const fileInput = document.getElementById('csv-upload-input');
-            fileInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    const buffer = evt.target.result;
-                    let text = '';
-                    try {
-                        let decoder = new TextDecoder('utf-8', { fatal: true });
-                        text = decoder.decode(buffer);
-                    } catch (err) {
-                        console.log("UTF-8 decoding failed, falling back to Big5");
-                        let decoder = new TextDecoder('big5');
-                        text = decoder.decode(buffer);
-                    }
-                    
-                    if(text.includes('')) {
-                        let decoder = new TextDecoder('big5');
-                        text = decoder.decode(buffer);
-                    }
-
-                    parseAndImportCSV(text);
-                    fileInput.value = ''; 
-                };
-                reader.readAsArrayBuffer(file);
-            });
-        }
-
-        function parseCSVText(text) {
-            const lines = [];
-            let currentLine = [];
-            let currentCell = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < text.length; i++) {
-                const char = text[i];
-                if (inQuotes) {
-                    if (char === '"') {
-                        if (i + 1 < text.length && text[i + 1] === '"') {
-                            currentCell += '"'; 
-                            i++;
-                        } else {
-                            inQuotes = false;
-                        }
-                    } else {
-                        currentCell += char;
-                    }
-                } else {
-                    if (char === '"') {
-                        inQuotes = true;
-                    } else if (char === ',') {
-                        currentLine.push(currentCell.trim());
-                        currentCell = '';
-                    } else if (char === '\n' || char === '\r') {
-                        if (currentCell !== '' || currentLine.length > 0) {
-                            currentLine.push(currentCell.trim());
-                            lines.push(currentLine);
-                            currentLine = [];
-                            currentCell = '';
-                        }
-                        if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
-                            i++; 
-                        }
-                    } else {
-                        currentCell += char;
-                    }
-                }
-            }
-            if (currentCell !== '' || currentLine.length > 0) {
-                currentLine.push(currentCell.trim());
-                lines.push(currentLine);
-            }
-            return lines;
-        }
-
-        function parseAndImportCSV(text) {
-            const lines = parseCSVText(text);
-            const batchDate = document.getElementById('csv-import-date').value;
-            const batchPayer = document.getElementById('csv-import-payer').value;
-            
-            let newRecords = [];
-            let importedCount = 0;
-
-            for (let i = 0; i < lines.length; i++) {
-                const row = lines[i];
-                if (row.length < 6) continue;
-
-                const title = row[0];
-                if (!title || title.includes('書名') || title.includes('總計') || title.includes('平均') || title.includes('點數') || title.includes('總價')) continue;
-
-                // 判斷該行是「花錢買書」還是「純點數紀錄」
-                // 預設第 2 欄是活動價(金額)，如果該欄位是空值或NaN，就當作0
-                let priceRaw = row[1].trim();
-                let price = priceRaw === '' ? 0 : parseFloat(priceRaw);
-                if (isNaN(price) || price < 0) price = 0; 
-                
-                // 讀取每人的欄位來判斷是否參與 (欄位裡有大於0的數字就代表有參與)
-                let buyers = [];
-                let pointsEarned = 0; // 若為純點數，我們從參與者的欄位數字來推算總點數
-                
-                const val2 = parseFloat(row[2]);
-                const val3 = parseFloat(row[3]);
-                const val4 = parseFloat(row[4]);
-                const val5 = parseFloat(row[5]);
-
-                if (!isNaN(val2) && val2 > 0) { buyers.push('心綺'); if(price===0) pointsEarned += val2; }
-                if (!isNaN(val3) && val3 > 0) { buyers.push('心薇'); if(price===0) pointsEarned += val3; }
-                if (!isNaN(val4) && val4 > 0) { buyers.push('欣璇'); if(price===0) pointsEarned += val4; }
-                if (!isNaN(val5) && val5 > 0) { buyers.push('阿澧'); if(price===0) pointsEarned += val5; }
-
-                if (buyers.length > 0) {
-                    let finalPayer = price > 0 ? batchPayer : null; // 【關鍵修改】：若是純點數 (price=0)，代墊人為 null
-                    let perPersonCash = price > 0 ? (price / buyers.length) : 0;
-                    let perPersonPointsEarned = price === 0 ? (pointsEarned / buyers.length) : 0;
-                    
-                    // 若原始資料有給特定的點數總額也可以讀，但通常 CSV 分開寫，這裡直接依邏輯計算
-                    newRecords.push({
-                        id: Date.now() + importedCount, 
-                        date: batchDate,
-                        title: title,
-                        payer: finalPayer,
-                        price: price,
-                        pointsUsed: 0,
-                        pointsEarned: pointsEarned, 
-                        buyers: buyers,
-                        perPersonCash: perPersonCash,
-                        perPersonPointsEarned: perPersonPointsEarned
-                    });
-                    importedCount++;
-                }
-            }
-
-            if (importedCount > 0) {
-                if(confirm(`成功解析出 ${importedCount} 筆紀錄！\n\n系統已自動判斷「花費」與「純點數」的差別。若為純點數紀錄，將不會有代墊人。\n\n請問確定要匯入嗎？`)) {
-                    recordsData = recordsData.concat(newRecords);
-                    updateUI();
-                    closeModal('backup-modal');
-                }
-            } else {
-                alert('解析失敗 😢 \n無法從這個 CSV 檔案中找到有效的購書紀錄。\n請確認格式是否為：「書名, 金額, 心綺數值, 心薇數值...」');
-            }
+             if (modalId === 'transaction-modal') { document.getElementById('add-transaction-form').reset(); currentEditingId = null; }
+             if (modalId === 'settle-modal') document.getElementById('add-payment-form').reset();
         }
 
         // --- 資料匯出/還原功能 ---
@@ -701,7 +608,7 @@
                     if(confirm('警告：這將會覆蓋您目前的所有的資料！確定要繼續嗎？')) {
                         recordsData = data.recordsData || [];
                         paymentsData = data.paymentsData || [];
-                        updateUI();
+                        updateUI(true);
                         closeModal('backup-modal');
                         alert('資料還原成功！系統已更新。');
                     }
@@ -713,11 +620,10 @@
             }
         }
 
-        // --- 購書紀錄 CRUD ---
         function deleteRecord(id) {
-            if(confirm('確定要刪除這筆紀錄嗎？這將會影響結算結果。')) {
+            if(confirm('確定要刪除這筆紀錄嗎？')) {
                 recordsData = recordsData.filter(record => record.id !== id);
-                updateUI();
+                updateUI(true);
             }
         }
 
@@ -728,7 +634,6 @@
             currentEditingId = id;
             openModal('transaction-modal', true);
             document.getElementById('modal-title').innerText = '編輯帳目紀錄';
-
             document.getElementById('trans-date').value = record.date;
             document.getElementById('trans-payer').value = record.payer || users[0];
             document.getElementById('trans-title').value = record.title;
@@ -736,12 +641,44 @@
             document.getElementById('trans-points-used').value = record.pointsUsed;
             document.getElementById('trans-points-earned').value = record.pointsEarned;
 
-            document.querySelectorAll('.trans-buyer-cb').forEach(cb => {
-                cb.checked = record.buyers.includes(cb.value);
-            });
+            document.querySelectorAll('.trans-buyer-cb').forEach(cb => { cb.checked = record.buyers.includes(cb.value); });
         }
 
-        // --- 還款紀錄 CRUD ---
+        document.getElementById('add-transaction-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const date = document.getElementById('trans-date').value;
+            const payer = document.getElementById('trans-payer').value;
+            const title = document.getElementById('trans-title').value;
+            const price = parseFloat(document.getElementById('trans-price').value) || 0;
+            const pointsUsed = parseFloat(document.getElementById('trans-points-used').value) || 0;
+            const pointsEarned = parseFloat(document.getElementById('trans-points-earned').value) || 0;
+            const checkedBoxes = document.querySelectorAll('.trans-buyer-cb:checked');
+            const buyers = Array.from(checkedBoxes).map(cb => cb.value);
+
+            if (price > 0 && buyers.length === 0) { alert('請至少勾選一位參與分攤的人員！'); return; }
+            if (pointsEarned > 0 && buyers.length === 0) { alert('請至少勾選一位參與分配的人員！'); return; }
+            if (pointsUsed > price && price > 0) { alert('折抵不能大於總價！'); return; }
+
+            let actualCashCost = Math.max(0, price - pointsUsed);
+            let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
+            let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
+
+            const newRecord = {
+                id: currentEditingId ? currentEditingId : Date.now(),
+                date, title, payer: (price > 0) ? payer : null, price, pointsUsed, pointsEarned, buyers, perPersonCash, perPersonPointsEarned
+            };
+
+            if (currentEditingId) {
+                const index = recordsData.findIndex(r => r.id === currentEditingId);
+                if (index !== -1) recordsData[index] = newRecord;
+            } else {
+                recordsData.push(newRecord);
+            }
+
+            updateUI(true);
+            closeModal('transaction-modal');
+        });
+
         function openSettleModal(fromUser, toUser, amount) {
             document.getElementById('payment-date').value = new Date().toISOString().split('T')[0];
             document.getElementById('payment-from').value = fromUser;
@@ -761,14 +698,14 @@
             if (amount <= 0) { alert('金額必須大於0！'); return; }
 
             paymentsData.push({ id: Date.now(), date, from, to, amount });
-            updateUI();
+            updateUI(true);
             closeModal('settle-modal');
         });
 
         function deletePayment(id) {
-            if(confirm('確定要刪除這筆還款紀錄嗎？餘額將會重新計算。')) {
+            if(confirm('確定要刪除這筆還款紀錄嗎？')) {
                 paymentsData = paymentsData.filter(p => p.id !== id);
-                updateUI();
+                updateUI(true);
             }
         }
 
@@ -778,30 +715,17 @@
                 tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何還款紀錄。</td></tr>`;
                 return;
             }
-            
             const sortedPayments = [...paymentsData].sort((a,b) => new Date(b.date) - new Date(a.date));
-            
             tbody.innerHTML = sortedPayments.map(p => `
                 <tr class="hover:bg-book-50/50">
                     <td class="px-4 py-3 text-book-600">${p.date}</td>
-                    <td class="px-4 py-3">
-                        <div class="flex items-center gap-2">
-                            <span class="text-book-900">${p.from}</span>
-                            <i class="ph ph-arrow-right text-emerald-600"></i>
-                            <span class="text-book-900">${p.to}</span>
-                        </div>
-                    </td>
+                    <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="text-book-900">${p.from}</span><i class="ph ph-arrow-right text-emerald-600"></i><span class="text-book-900">${p.to}</span></div></td>
                     <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${p.amount.toFixed(2)}</td>
-                    <td class="px-4 py-3 text-center">
-                        <button onclick="deletePayment(${p.id})" class="text-book-400 hover:text-red-500 p-1" title="刪除還款紀錄">
-                            <i class="ph-fill ph-trash text-lg"></i>
-                        </button>
-                    </td>
+                    <td class="px-4 py-3 text-center"><button onclick="deletePayment(${p.id})" class="text-book-400 hover:text-red-500 p-1"><i class="ph-fill ph-trash text-lg"></i></button></td>
                 </tr>
             `).join('');
         }
 
-        // --- 檢視單筆明細 ---
         function viewTransactionDetail(id) {
             const record = recordsData.find(r => r.id === id);
             if (!record) return;
@@ -810,11 +734,9 @@
             document.getElementById('tx-detail-title').innerText = record.title;
             document.getElementById('tx-detail-payer').innerText = record.payer ? record.payer : '無 (純點數)';
             document.getElementById('tx-detail-buyer-count').innerText = `${record.buyers.length} 人`;
-            
             document.getElementById('tx-detail-price').innerText = `$${record.price.toFixed(2)}`;
             document.getElementById('tx-detail-points-used').innerText = record.pointsUsed > 0 ? `- ${record.pointsUsed.toFixed(2)}` : '0';
             document.getElementById('tx-detail-points-earned').innerText = record.pointsEarned > 0 ? `+ ${record.pointsEarned.toFixed(2)}` : '0';
-            
             const actualCash = Math.max(0, record.price - record.pointsUsed);
             document.getElementById('tx-detail-actual-cash').innerText = `$${actualCash.toFixed(2)}`;
 
@@ -827,12 +749,10 @@
                     </div>
                 </div>
             `).join('');
-
             document.getElementById('tx-detail-buyers-list').innerHTML = record.buyers.length > 0 ? buyersListHtml : '<p class="text-book-400 text-sm italic">無參與者</p>';
             openModal('tx-detail-modal');
         }
 
-        // --- 檢視個人專屬明細 ---
         function viewUserDetail(userName) {
             let expense = 0, paid = 0, points = 0, settledSent = 0, settledRecv = 0;
             let userHistory = []; 
@@ -840,23 +760,13 @@
             recordsData.forEach(r => {
                 const isPayer = r.payer === userName;
                 const isBuyer = r.buyers && r.buyers.includes(userName);
-                
                 if (isPayer) paid += (r.price || 0);
-                if (isBuyer) {
-                    expense += (r.perPersonCash || 0);
-                    points += (r.perPersonPointsEarned || 0);
-                }
-
+                if (isBuyer) { expense += (r.perPersonCash || 0); points += (r.perPersonPointsEarned || 0); }
                 if (isPayer || isBuyer) {
                     userHistory.push({
-                        type: 'book',
-                        date: r.date,
-                        timestamp: new Date(r.date).getTime() + r.id, 
-                        title: r.title,
-                        isPayer, isBuyer,
-                        myExpense: isBuyer ? r.perPersonCash : 0,
-                        myPaid: isPayer ? r.price : 0,
-                        myPoints: isBuyer ? r.perPersonPointsEarned : 0
+                        type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + r.id, 
+                        title: r.title, isPayer, isBuyer, myExpense: isBuyer ? r.perPersonCash : 0,
+                        myPaid: isPayer ? r.price : 0, myPoints: isBuyer ? r.perPersonPointsEarned : 0
                     });
                 }
             });
@@ -864,39 +774,28 @@
             paymentsData.forEach(p => {
                 const isSender = p.from === userName;
                 const isReceiver = p.to === userName;
-                
                 if (isSender) settledSent += p.amount;
                 if (isReceiver) settledRecv += p.amount;
-
                 if (isSender || isReceiver) {
                     userHistory.push({
-                        type: 'payment',
-                        date: p.date,
-                        timestamp: new Date(p.date).getTime() + p.id,
+                        type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + p.id,
                         title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
-                        isSender, isReceiver,
-                        amount: p.amount
+                        isSender, isReceiver, amount: p.amount
                     });
                 }
             });
 
             const balance = (paid + settledSent) - (expense + settledRecv);
-
             document.getElementById('user-detail-name').innerText = userName;
             document.getElementById('user-detail-avatar').innerText = userName.charAt(0);
-            
             document.getElementById('user-detail-expense').innerText = `$${expense.toFixed(2)}`;
             document.getElementById('user-detail-paid').innerText = `$${paid.toFixed(2)}`;
             document.getElementById('user-detail-points').innerText = `+${points.toFixed(2)}`;
             
             const balanceEl = document.getElementById('user-detail-balance');
-            if (balance > 0.01) {
-                balanceEl.innerHTML = `<span class="text-emerald-600">應收回(或預繳) $${balance.toFixed(2)}</span>`;
-            } else if (balance < -0.01) {
-                balanceEl.innerHTML = `<span class="text-red-600">需支付 $${Math.abs(balance).toFixed(2)}</span>`;
-            } else {
-                balanceEl.innerHTML = `<span class="text-book-600">已結清 ($0)</span>`;
-            }
+            if (balance > 0.01) balanceEl.innerHTML = `<span class="text-emerald-600">應收回(或預繳) $${balance.toFixed(2)}</span>`;
+            else if (balance < -0.01) balanceEl.innerHTML = `<span class="text-red-600">需支付 $${Math.abs(balance).toFixed(2)}</span>`;
+            else balanceEl.innerHTML = `<span class="text-book-600">已結清 ($0)</span>`;
 
             userHistory.sort((a,b) => b.timestamp - a.timestamp);
             const tbody = document.getElementById('user-detail-records-body');
@@ -905,23 +804,13 @@
                 tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何帳戶異動紀錄。</td></tr>`;
             } else {
                 tbody.innerHTML = userHistory.map(item => {
-                    let roleTags = '';
-                    let expenseCol = '-';
-                    let cashFlowCol = '-';
-
+                    let roleTags = '', expenseCol = '-', cashFlowCol = '-';
                     if (item.type === 'book') {
                         if (item.isPayer && item.myPaid > 0) roleTags += `<span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] mr-1">代墊</span>`;
                         if (item.isBuyer) roleTags += `<span class="bg-book-200 text-book-800 px-1.5 py-0.5 rounded text-[10px]">分攤</span>`;
-                        
                         if (item.myExpense > 0) expenseCol = `<span class="text-book-800 font-bold">$${item.myExpense.toFixed(2)}</span>`;
-                        
-                        if (item.myPaid > 0) {
-                            cashFlowCol = `<span class="text-blue-600 font-bold">掏出 $${item.myPaid.toFixed(2)}</span>`;
-                        }
-                        if (item.myPoints > 0) {
-                            expenseCol += `<br><span class="text-[10px] text-emerald-600 font-normal">+${item.myPoints.toFixed(2)} 點</span>`;
-                        }
-
+                        if (item.myPaid > 0) cashFlowCol = `<span class="text-blue-600 font-bold">掏出 $${item.myPaid.toFixed(2)}</span>`;
+                        if (item.myPoints > 0) expenseCol += `<br><span class="text-[10px] text-emerald-600 font-normal">+${item.myPoints.toFixed(2)} 點</span>`;
                     } else if (item.type === 'payment') {
                         if (item.isSender) {
                             roleTags = `<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">支付還款</span>`;
@@ -931,43 +820,29 @@
                             cashFlowCol = `<span class="text-emerald-600 font-bold">收回 $${item.amount.toFixed(2)}</span>`;
                         }
                     }
-
                     return `
                     <tr class="hover:bg-book-50/50 transition-colors">
-                        <td class="px-4 py-3">
-                            <div class="text-xs text-book-500">${item.date}</div>
-                            <div class="font-bold text-book-900">${item.title}</div>
-                        </td>
+                        <td class="px-4 py-3"><div class="text-xs text-book-500">${item.date}</div><div class="font-bold text-book-900">${item.title}</div></td>
                         <td class="px-4 py-3 text-center whitespace-nowrap">${roleTags}</td>
                         <td class="px-4 py-3 text-right font-mono text-sm leading-tight">${expenseCol}</td>
                         <td class="px-4 py-3 text-right font-mono text-sm">${cashFlowCol}</td>
-                    </tr>
-                    `;
+                    </tr>`;
                 }).join('');
             }
             openModal('user-detail-modal');
         }
 
-        // 查詢功能
         function applyFilter() { renderRecords(); }
-        function clearFilter() {
-            document.getElementById('filter-start').value = '';
-            document.getElementById('filter-end').value = '';
-            renderRecords();
-        }
+        function clearFilter() { document.getElementById('filter-start').value = ''; document.getElementById('filter-end').value = ''; renderRecords(); }
 
-        // 渲染主畫面
         function renderDashboard() {
             let totalPoints = 0;
             let accounts = {};
             users.forEach(u => accounts[u] = { expense: 0, paid: 0, points: 0, settledSent: 0, settledRecv: 0 });
 
             recordsData.forEach(record => {
-                totalPoints += (record.pointsEarned || 0);
-                totalPoints -= (record.pointsUsed || 0);
-                if (record.payer && accounts[record.payer]) {
-                    accounts[record.payer].paid += (record.price || 0);
-                }
+                totalPoints += (record.pointsEarned || 0); totalPoints -= (record.pointsUsed || 0);
+                if (record.payer && accounts[record.payer]) accounts[record.payer].paid += (record.price || 0);
                 if (record.buyers && record.buyers.length > 0) {
                     record.buyers.forEach(buyer => {
                         if (accounts[buyer]) {
@@ -998,17 +873,11 @@
             let transfers = [];
             let dIndex = 0, cIndex = 0;
             while (dIndex < debtors.length && cIndex < creditors.length) {
-                let debtor = debtors[dIndex];
-                let creditor = creditors[cIndex];
+                let debtor = debtors[dIndex]; let creditor = creditors[cIndex];
                 let amountToTransfer = Math.min(debtor.amount, creditor.amount);
-                
-                if (amountToTransfer > 0.01) {
-                    transfers.push({ from: debtor.name, to: creditor.name, amount: amountToTransfer });
-                }
-                debtor.amount -= amountToTransfer;
-                creditor.amount -= amountToTransfer;
-                if (debtor.amount < 0.01) dIndex++;
-                if (creditor.amount < 0.01) cIndex++;
+                if (amountToTransfer > 0.01) transfers.push({ from: debtor.name, to: creditor.name, amount: amountToTransfer });
+                debtor.amount -= amountToTransfer; creditor.amount -= amountToTransfer;
+                if (debtor.amount < 0.01) dIndex++; if (creditor.amount < 0.01) cIndex++;
             }
 
             const settlementContainer = document.getElementById('settlement-results');
@@ -1021,9 +890,7 @@
                             <span class="text-book-900">${t.from}</span>
                             <i class="ph ph-arrow-right text-book-300"></i>
                             <span class="text-book-900">${t.to}</span>
-                            <span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">
-                                應付 $${t.amount.toFixed(2)}
-                            </span>
+                            <span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">應付 $${t.amount.toFixed(2)}</span>
                         </div>
                         <button onclick="openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
                             <i class="ph ph-money"></i> 紀錄部分/全額還款
@@ -1034,45 +901,29 @@
 
             const grid = document.getElementById('dashboard-users-grid');
             grid.innerHTML = users.map(user => {
-                const acc = accounts[user];
-                const bal = balances[user];
+                const acc = accounts[user]; const bal = balances[user];
                 let statusHtml = '';
-                if (bal > 0.01) {
-                    statusHtml = `<span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">應收回 $${bal.toFixed(2)}</span>`;
-                } else if (bal < -0.01) {
-                    statusHtml = `<span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100">需支付 $${Math.abs(bal).toFixed(2)}</span>`;
-                } else {
-                    statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
-                }
+                if (bal > 0.01) statusHtml = `<span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">應收回 $${bal.toFixed(2)}</span>`;
+                else if (bal < -0.01) statusHtml = `<span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100">需支付 $${Math.abs(bal).toFixed(2)}</span>`;
+                else statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
 
                 return `
                 <div onclick="viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
                     <div class="p-4 border-b border-book-100 flex items-center justify-between bg-book-50/50 group-hover:bg-book-100/50 transition-colors">
                         <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">
-                                ${user.charAt(0)}
-                            </div>
+                            <div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">${user.charAt(0)}</div>
                             <h3 class="font-serif font-bold text-book-900 text-lg">${user}</h3>
                         </div>
                         ${statusHtml}
                     </div>
                     <div class="p-4 flex flex-col gap-3 text-sm">
-                        <div class="flex justify-between items-center text-book-800">
-                            <span>共消費</span>
-                            <span class="font-mono font-bold">$${acc.expense.toFixed(2)}</span>
-                        </div>
-                        <div class="flex justify-between items-center text-book-800">
-                            <span>已代墊</span>
-                            <span class="font-mono font-bold">$${acc.paid.toFixed(2)}</span>
-                        </div>
+                        <div class="flex justify-between items-center text-book-800"><span>共消費</span><span class="font-mono font-bold">$${acc.expense.toFixed(2)}</span></div>
+                        <div class="flex justify-between items-center text-book-800"><span>已代墊</span><span class="font-mono font-bold">$${acc.paid.toFixed(2)}</span></div>
                         <div class="h-px w-full bg-book-100 my-1"></div>
-                        <div class="flex justify-between items-center">
-                            <span class="text-book-600 font-medium">個人獲得點數</span>
-                            <span class="font-mono font-bold text-emerald-600">+${acc.points.toFixed(2)} Pts</span>
-                        </div>
+                        <div class="flex justify-between items-center"><span class="text-book-600 font-medium">個人獲得點數</span><span class="font-mono font-bold text-emerald-600">+${acc.points.toFixed(2)} Pts</span></div>
                     </div>
-                </div>
-            `}).join('');
+                </div>`;
+            }).join('');
 
             const leaderboardContainer = document.getElementById('leaderboard-container');
             const sortedUsers = [...users].sort((a, b) => accounts[b].expense - accounts[a].expense);
@@ -1082,8 +933,7 @@
                 leaderboardContainer.innerHTML = `<p class="text-book-400 text-center py-4 font-serif italic">目前大家的心如止水，尚未有任何購書紀錄。</p>`;
             } else {
                 leaderboardContainer.innerHTML = sortedUsers.map((user, index) => {
-                    const exp = accounts[user].expense;
-                    const percentage = (exp / maxExpense) * 100;
+                    const exp = accounts[user].expense; const percentage = (exp / maxExpense) * 100;
                     let rankIcon = index === 0 ? '<i class="ph-fill ph-medal text-yellow-500 text-3xl drop-shadow-sm"></i>' : 
                                    index === 1 ? '<i class="ph-fill ph-medal text-slate-400 text-3xl drop-shadow-sm"></i>' : 
                                    index === 2 ? '<i class="ph-fill ph-medal text-amber-700 text-3xl drop-shadow-sm"></i>' : 
@@ -1094,13 +944,10 @@
                         <div class="flex-shrink-0 w-10 flex justify-center">${rankIcon}</div>
                         <div class="font-serif font-bold text-book-900 w-12 text-lg">${user}</div>
                         <div class="flex-grow h-4 bg-book-100 rounded-full overflow-hidden shadow-inner">
-                            <div class="h-full bg-book-600 rounded-full transition-all duration-1000 ease-out relative overflow-hidden" style="width: ${percentage}%">
-                                <div class="absolute inset-0 bg-white/20 w-full h-full transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-                            </div>
+                            <div class="h-full bg-book-600 rounded-full transition-all duration-1000 ease-out relative overflow-hidden" style="width: ${percentage}%"><div class="absolute inset-0 bg-white/20 w-full h-full transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div></div>
                         </div>
                         <div class="w-24 text-right font-mono font-bold text-book-900 text-lg">$${exp.toFixed(2)}</div>
-                    </div>
-                    `;
+                    </div>`;
                 }).join('');
             }
         }
@@ -1127,75 +974,19 @@
                 return `
                 <tr onclick="viewTransactionDetail(${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-book-600">${record.date}</td>
-                    <td class="px-4 py-3 text-sm font-serif font-bold text-book-900">
-                        ${record.title}
-                        ${isOnlyPoints ? `<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>` : ''}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">
-                        ${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${record.payer}</span>` : '-'}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono">
-                        <div class="font-bold text-book-900">$${record.price.toFixed(2)}</div>
-                        ${record.pointsUsed > 0 ? `<div class="text-xs text-red-500 mt-0.5">- ${record.pointsUsed.toFixed(2)} 點</div>` : ''}
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-emerald-600 font-bold">
-                        ${record.pointsEarned > 0 ? `+${record.pointsEarned.toFixed(2)}` : '-'}
-                    </td>
-                    <td class="px-4 py-3 text-sm text-book-800">
-                        <div class="flex flex-wrap gap-1">
-                            ${record.buyers.length > 0 ? record.buyers.map(b => `<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">${b}</span>`).join('') : '-'}
-                        </div>
-                    </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono">
-                        <div class="font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>
-                        ${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${record.perPersonPointsEarned.toFixed(2)} 點</div>` : ''}
-                    </td>
+                    <td class="px-4 py-3 text-sm font-serif font-bold text-book-900">${record.title}${isOnlyPoints ? `<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>` : ''}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${record.payer}</span>` : '-'}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${record.price.toFixed(2)}</div>${record.pointsUsed > 0 ? `<div class="text-xs text-red-500 mt-0.5">- ${record.pointsUsed.toFixed(2)} 點</div>` : ''}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-emerald-600 font-bold">${record.pointsEarned > 0 ? `+${record.pointsEarned.toFixed(2)}` : '-'}</td>
+                    <td class="px-4 py-3 text-sm text-book-800"><div class="flex flex-wrap gap-1">${record.buyers.length > 0 ? record.buyers.map(b => `<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">${b}</span>`).join('') : '-'}</div></td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${record.perPersonPointsEarned.toFixed(2)} 點</div>` : ''}</td>
                     <td class="px-4 py-3 whitespace-nowrap text-center">
-                        <button onclick="event.stopPropagation(); editRecord(${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1" title="編輯此紀錄">
-                            <i class="ph-fill ph-pencil-simple text-lg"></i>
-                        </button>
-                        <button onclick="event.stopPropagation(); deleteRecord(${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1" title="刪除此紀錄">
-                            <i class="ph-fill ph-trash text-lg"></i>
-                        </button>
+                        <button onclick="event.stopPropagation(); editRecord(${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+                        <button onclick="event.stopPropagation(); deleteRecord(${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
                     </td>
-                </tr>
-            `}).join('');
+                </tr>`;
+            }).join('');
         }
-
-        document.getElementById('add-transaction-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const date = document.getElementById('trans-date').value;
-            const payer = document.getElementById('trans-payer').value;
-            const title = document.getElementById('trans-title').value;
-            const price = parseFloat(document.getElementById('trans-price').value) || 0;
-            const pointsUsed = parseFloat(document.getElementById('trans-points-used').value) || 0;
-            const pointsEarned = parseFloat(document.getElementById('trans-points-earned').value) || 0;
-            const checkedBoxes = document.querySelectorAll('.trans-buyer-cb:checked');
-            const buyers = Array.from(checkedBoxes).map(cb => cb.value);
-
-            if (price > 0 && buyers.length === 0) { alert('有消費金額產生，請至少勾選一位參與分攤的人員！'); return; }
-            if (pointsEarned > 0 && buyers.length === 0) { alert('有點數產生，請至少勾選一位參與分配的人員！'); return; }
-            if (pointsUsed > price && price > 0) { alert('折抵的點數不能大於總價喔！'); return; }
-
-            let actualCashCost = Math.max(0, price - pointsUsed);
-            let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
-            let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
-
-            const newRecord = {
-                id: currentEditingId ? currentEditingId : Date.now(),
-                date, title, payer: (price > 0) ? payer : null, price, pointsUsed, pointsEarned, buyers, perPersonCash, perPersonPointsEarned
-            };
-
-            if (currentEditingId) {
-                const index = recordsData.findIndex(r => r.id === currentEditingId);
-                if (index !== -1) recordsData[index] = newRecord;
-            } else {
-                recordsData.push(newRecord);
-            }
-
-            updateUI();
-            closeModal('transaction-modal');
-        });
 
         init();
     </script>
