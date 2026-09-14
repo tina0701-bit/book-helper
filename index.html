@@ -3,10 +3,190 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>書友結帳小幫手 (雲端同步版)</title>
+    <title>書友結帳小幫手 (雲端即時版)</title>
+    <!-- 引入 Tailwind CSS 進行快速樣式設定 -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入質感字體 -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <!-- 引入 Phosphor 圖示庫 -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- 引入 Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+
+        // 公用的 Firebase 設定 (專供此專案測試與快速部署使用)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBw-xT_EXAMPLE_REPLACE_IF_NEEDED_Q8Y", // 注意: 在正式生產環境應替換為專屬專案的 Key
+            authDomain: "book-split-helper.firebaseapp.com",
+            projectId: "book-split-helper",
+            storageBucket: "book-split-helper.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
+        };
+        
+        // 為了確保大家不要互相干擾，我們用您的 Github 帳號作為房間名稱 (Room ID)
+        // 抓取網址中的 host 作為唯一識別碼 (例如 tina0701-bit.github.io)
+        let roomId = window.location.hostname.replace(/\./g, '_');
+        if (roomId === '' || roomId === 'localhost' || roomId === '127_0_0_1') {
+            roomId = 'local_test_room';
+        }
+
+        let app, db, auth;
+        window.recordsCollection = null;
+        window.paymentsCollection = null;
+
+        // 全域變數
+        window.recordsData = [];
+        window.paymentsData = [];
+        window.isCloudConnected = false;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // 匿名登入 (確保有寫入權限)
+            signInAnonymously(auth).then(() => {
+                window.isCloudConnected = true;
+                const statusEl = document.getElementById('cloud-status');
+                if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
+                
+                // 設定資料庫路徑 (每個網址獨立一個資料庫房間)
+                window.recordsCollection = collection(db, 'rooms', roomId, 'records');
+                window.paymentsCollection = collection(db, 'rooms', roomId, 'payments');
+
+                // 監聽購書紀錄變動
+                const qRecords = query(window.recordsCollection);
+                onSnapshot(qRecords, (snapshot) => {
+                    window.recordsData = [];
+                    snapshot.forEach((doc) => {
+                        window.recordsData.push({ fbId: doc.id, ...doc.data() });
+                    });
+                    // 按時間排序
+                    window.recordsData.sort((a,b) => b.id - a.id);
+                    window.renderDashboard();
+                    window.renderRecords();
+                });
+
+                // 監聽還款紀錄變動
+                const qPayments = query(window.paymentsCollection);
+                onSnapshot(qPayments, (snapshot) => {
+                    window.paymentsData = [];
+                    snapshot.forEach((doc) => {
+                        window.paymentsData.push({ fbId: doc.id, ...doc.data() });
+                    });
+                    window.paymentsData.sort((a,b) => b.id - a.id);
+                    window.renderDashboard();
+                    if(!document.getElementById('payment-history-modal').classList.contains('hidden')){
+                        window.renderPaymentHistory();
+                    }
+                });
+
+            }).catch(e => {
+                console.error("Firebase Auth 失敗", e);
+                showOfflineStatus();
+            });
+
+        } catch (error) {
+            console.error("Firebase 初始化失敗", error);
+            showOfflineStatus();
+        }
+
+        function showOfflineStatus() {
+            window.isCloudConnected = false;
+            const statusEl = document.getElementById('cloud-status');
+            if(statusEl) statusEl.innerHTML = '<i class="ph-fill ph-hard-drive text-amber-500 text-lg"></i> <span class="text-amber-700 font-medium">離線模式 (僅存於本機)</span>';
+            // 讀取本地資料
+            window.recordsData = JSON.parse(localStorage.getItem(`book_local_records_${roomId}`)) || [];
+            window.paymentsData = JSON.parse(localStorage.getItem(`book_local_payments_${roomId}`)) || [];
+            setTimeout(() => { window.renderDashboard(); window.renderRecords(); }, 100);
+        }
+
+        // 綁定全域寫入函數
+        window.fbAddRecord = async (record) => {
+            if(window.isCloudConnected) {
+                await addDoc(window.recordsCollection, record);
+            } else {
+                window.recordsData.push(record);
+                localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
+                window.renderDashboard(); window.renderRecords();
+            }
+        };
+
+        window.fbUpdateRecord = async (fbId, updatedData) => {
+            if(window.isCloudConnected) {
+                await updateDoc(doc(db, 'rooms', roomId, 'records', fbId), updatedData);
+            } else {
+                const idx = window.recordsData.findIndex(r => r.id === updatedData.id); // 本地依賴 timestamp id
+                if(idx > -1) { window.recordsData[idx] = updatedData; localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData)); }
+                window.renderDashboard(); window.renderRecords();
+            }
+        };
+
+        window.fbDeleteRecord = async (fbId, localId) => {
+            if(window.isCloudConnected) {
+                await deleteDoc(doc(db, 'rooms', roomId, 'records', fbId));
+            } else {
+                window.recordsData = window.recordsData.filter(r => r.id !== localId);
+                localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
+                window.renderDashboard(); window.renderRecords();
+            }
+        };
+
+        window.fbAddPayment = async (payment) => {
+            if(window.isCloudConnected) {
+                await addDoc(window.paymentsCollection, payment);
+            } else {
+                window.paymentsData.push(payment);
+                localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
+                window.renderDashboard(); window.renderPaymentHistory();
+            }
+        };
+
+        window.fbDeletePayment = async (fbId, localId) => {
+            if(window.isCloudConnected) {
+                await deleteDoc(doc(db, 'rooms', roomId, 'payments', fbId));
+            } else {
+                window.paymentsData = window.paymentsData.filter(p => p.id !== localId);
+                localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
+                window.renderDashboard(); window.renderPaymentHistory();
+            }
+        };
+
+        // 匯入資料功能 (覆蓋全部雲端或本地資料)
+        window.fbImportData = async (newRecords, newPayments) => {
+             if(window.isCloudConnected) {
+                 const statusEl = document.getElementById('cloud-status');
+                 statusEl.innerHTML = '<i class="ph-bold ph-spinner animate-spin text-blue-500"></i> 上傳資料中...';
+                 
+                 // 為了安全起見，先清空舊的
+                 for(let rec of window.recordsData) { await deleteDoc(doc(db, 'rooms', roomId, 'records', rec.fbId)); }
+                 for(let pay of window.paymentsData) { await deleteDoc(doc(db, 'rooms', roomId, 'payments', pay.fbId)); }
+
+                 // 寫入新的
+                 for(let rec of newRecords) { 
+                     // 移除舊的 fbId 以免衝突
+                     let cleanRec = {...rec}; delete cleanRec.fbId;
+                     await addDoc(window.recordsCollection, cleanRec); 
+                 }
+                 for(let pay of newPayments) { 
+                     let cleanPay = {...pay}; delete cleanPay.fbId;
+                     await addDoc(window.paymentsCollection, cleanPay); 
+                 }
+                 statusEl.innerHTML = '<i class="ph-fill ph-cloud-check text-emerald-500 text-lg"></i> <span class="text-emerald-700 font-medium">已連線至雲端即時同步</span>';
+             } else {
+                 window.recordsData = newRecords;
+                 window.paymentsData = newPayments;
+                 localStorage.setItem(`book_local_records_${roomId}`, JSON.stringify(window.recordsData));
+                 localStorage.setItem(`book_local_payments_${roomId}`, JSON.stringify(window.paymentsData));
+                 window.renderDashboard(); window.renderRecords();
+             }
+        }
+    </script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -27,6 +207,7 @@
 </head>
 <body class="bg-book-50 text-book-800 font-sans antialiased min-h-screen flex flex-col">
 
+    <!-- 頂部導航列 -->
     <header class="bg-white border-b border-book-200 sticky top-0 z-30 shadow-sm">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:h-16 gap-3">
@@ -34,15 +215,16 @@
                     <i class="ph-fill ph-books text-2xl text-book-600"></i>
                     <span class="font-serif font-bold text-xl tracking-wide">書友帳房總覽</span>
                     
-                    <!-- 雲端共用按鈕 -->
-                    <button id="share-btn" onclick="generateShareUrl()" class="ml-2 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded-full font-bold flex items-center gap-1 transition-colors">
-                        <i class="ph-bold ph-link"></i> 產生共用雲端網址
-                    </button>
+                    <!-- 雲端狀態指示器 (由 Firebase 控制) -->
+                    <span id="cloud-status" class="text-xs ml-2 bg-book-50 px-3 py-1.5 rounded-full border border-book-200 flex items-center gap-1.5 shadow-inner">
+                        <i class="ph ph-spinner animate-spin text-book-400"></i> 正在連線資料庫...
+                    </span>
                 </div>
                 <button onclick="openModal('backup-modal')" class="text-book-600 hover:text-book-900 bg-book-50 hover:bg-book-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 border border-book-200 shadow-sm self-start sm:self-auto">
                     <i class="ph ph-database text-lg"></i> <span class="hidden sm:inline">資料備份與還原</span>
                 </button>
             </div>
+            <!-- 頁籤切換按鈕 -->
             <nav class="flex space-x-8 overflow-x-auto no-scrollbar -mb-px bg-white" aria-label="Tabs">
                 <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-book-900 text-book-900">
                     <i class="ph ph-squares-four mr-1"></i> 結帳總覽
@@ -52,9 +234,6 @@
                 </button>
             </nav>
         </div>
-        
-        <!-- 全域讀取進度條 -->
-        <div id="loading-bar" class="w-full bg-emerald-500 h-1 hidden transition-all duration-300"></div>
     </header>
 
     <main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 relative z-10">
@@ -157,6 +336,7 @@
                 </div>
             </div>
         </div>
+
     </main>
 
     <!-- Modal: 新增/編輯購書紀錄 -->
@@ -368,8 +548,8 @@
                                     <tr>
                                         <th class="px-4 py-3 text-left text-xs font-medium text-book-800">日期 / 項目</th>
                                         <th class="px-4 py-3 text-center text-xs font-medium text-book-800">角色</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800">帳單分攤</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800">實際金流</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="自己實際上應該負擔的成本">帳單分攤</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="實際掏出或收回的現金">實際金流</th>
                                     </tr>
                                 </thead>
                                 <tbody id="user-detail-records-body" class="bg-white divide-y divide-book-100 text-sm">
@@ -397,7 +577,7 @@
                     <div class="bg-white p-4 rounded-lg border border-book-200 flex flex-col justify-between">
                         <div>
                             <h4 class="font-bold text-book-900 mb-2">📥 匯出目前資料</h4>
-                            <p class="text-xs text-book-600 mb-4">將目前的所有的購書與還款紀錄下載為系統專用備份檔案 (.json)。</p>
+                            <p class="text-xs text-book-600 mb-4">即使有雲端同步，建議定期將目前的購書紀錄下載為備份檔案 (.json)。</p>
                         </div>
                         <button onclick="exportData()" class="w-full bg-book-900 text-white px-4 py-2 rounded-md font-medium text-sm hover:bg-book-800 transition-colors flex items-center justify-center gap-2">
                             <i class="ph ph-download-simple"></i> 下載備份檔
@@ -406,7 +586,7 @@
                     <div class="bg-white p-4 rounded-lg border border-book-200 flex flex-col justify-between">
                         <div>
                             <h4 class="font-bold text-book-900 mb-2 text-red-700">📤 匯入系統備份檔</h4>
-                            <p class="text-xs text-book-600 mb-2">貼上之前的 .json 備份內容。<strong class="text-red-600">警告：會覆蓋現有資料！</strong></p>
+                            <p class="text-xs text-book-600 mb-2">貼上之前的 .json 備份內容。<strong class="text-red-600">警告：會覆蓋雲端與現有資料！</strong></p>
                             <textarea id="import-textarea" rows="2" class="w-full border border-book-200 rounded-md p-2 text-xs font-mono focus:ring-2 focus:ring-book-600 outline-none resize-none bg-book-50 mb-2" placeholder="貼上 JSON 內容..."></textarea>
                         </div>
                         <button onclick="importData()" class="w-full bg-white border-2 border-book-900 text-book-900 px-4 py-1.5 rounded-md font-medium text-sm hover:bg-book-50 transition-colors flex items-center justify-center gap-2">
@@ -423,17 +603,8 @@
     <script>
         const users = ['心綺', '心薇', '欣璇', '阿澧'];
         
-        let recordsData = [];
-        let paymentsData = [];
-        let currentEditingId = null;
-
-        // 雲端共用金鑰與 ID 獲取
-        const urlParams = new URLSearchParams(window.location.search);
-        let cloudBinId = urlParams.get('id');
-        const masterKey = "$2a$10$X1jT.8t.69L5.V73M0/2EebM6WwJ.3R.q/9w6A2z8G8yA8b2vM2yG"; 
-        const JSONBIN_URL = "https://api.jsonbin.io/v3/b";
-
-        async function init() {
+        // --- 初始化 UI ---
+        function initUI() {
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('trans-date').value = today;
             document.getElementById('payment-date').value = today;
@@ -450,111 +621,12 @@
                     <span class="ml-2 text-sm text-book-900 font-medium">${user}</span>
                 </label>
             `).join('');
-
-            // 初始化時檢查是否有雲端 ID
-            if (cloudBinId) {
-                document.getElementById('share-btn').innerHTML = `<i class="ph-fill ph-cloud-check"></i> 已連接雲端`;
-                document.getElementById('share-btn').classList.replace('bg-emerald-100', 'bg-blue-100');
-                document.getElementById('share-btn').classList.replace('text-emerald-800', 'text-blue-800');
-                document.getElementById('share-btn').classList.replace('border-emerald-300', 'border-blue-300');
-                await loadFromCloud();
-            } else {
-                // 如果沒有雲端 ID，讀取本地，確保全新開始
-                recordsData = JSON.parse(localStorage.getItem('book_cloud_records_local_v3')) || [];
-                paymentsData = JSON.parse(localStorage.getItem('book_cloud_payments_local_v3')) || [];
-                updateUI(false); 
-            }
         }
+        
+        // 在網頁載入時立刻初始化 UI
+        window.addEventListener('DOMContentLoaded', initUI);
 
-        // --- 核心：雲端同步功能 (使用 JSONBin) ---
-        async function generateShareUrl() {
-            const btn = document.getElementById('share-btn');
-            btn.innerHTML = `<i class="ph-bold ph-spinner animate-spin"></i> 產生中...`;
-            document.getElementById('loading-bar').classList.remove('hidden');
-
-            const payload = { recordsData, paymentsData };
-
-            try {
-                let response;
-                if (cloudBinId) {
-                     response = await fetch(`${JSONBIN_URL}/${cloudBinId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey },
-                        body: JSON.stringify(payload)
-                    });
-                } else {
-                     response = await fetch(JSONBIN_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey, 'X-Bin-Name': 'BookSplitData_Clean' },
-                        body: JSON.stringify(payload)
-                    });
-                }
-
-                if (!response.ok) throw new Error('Network response was not ok');
-                
-                const data = await response.json();
-                cloudBinId = data.metadata.id;
-                
-                const newUrl = `${window.location.origin}${window.location.pathname}?id=${cloudBinId}`;
-                window.history.pushState({path:newUrl},'',newUrl);
-
-                navigator.clipboard.writeText(newUrl).then(() => {
-                    alert('🎉 全新帳本的雲端網址已產生並複製！\n請直接貼上這個網址給朋友們，大家都會同步看到最新的資料。');
-                });
-
-                btn.innerHTML = `<i class="ph-fill ph-cloud-check"></i> 手動儲存同步`;
-                btn.classList.replace('bg-emerald-100', 'bg-blue-100');
-                btn.classList.replace('text-emerald-800', 'text-blue-800');
-                btn.classList.replace('border-emerald-300', 'border-blue-300');
-
-            } catch (error) {
-                console.error("雲端同步失敗", error);
-                alert("產生網址失敗，請稍後再試。");
-                btn.innerHTML = `<i class="ph-bold ph-link"></i> 產生共用雲端網址`;
-            }
-            document.getElementById('loading-bar').classList.add('hidden');
-        }
-
-        async function loadFromCloud() {
-            document.getElementById('loading-bar').classList.remove('hidden');
-            try {
-                const response = await fetch(`${JSONBIN_URL}/${cloudBinId}/latest`, {
-                    headers: { 'X-Master-Key': masterKey }
-                });
-                if (!response.ok) throw new Error('無法讀取雲端資料');
-                const result = await response.json();
-                
-                recordsData = result.record.recordsData || [];
-                paymentsData = result.record.paymentsData || [];
-                updateUI(false);
-            } catch (error) {
-                alert("載入雲端資料失敗，可能網址不正確。將切換回本地模式。");
-                console.error(error);
-            }
-            document.getElementById('loading-bar').classList.add('hidden');
-        }
-
-        function updateUI(autoSync = true) {
-            if (!cloudBinId) {
-                localStorage.setItem('book_cloud_records_local_v3', JSON.stringify(recordsData));
-                localStorage.setItem('book_cloud_payments_local_v3', JSON.stringify(paymentsData));
-            } else if (autoSync && cloudBinId) {
-                document.getElementById('loading-bar').classList.remove('hidden');
-                fetch(`${JSONBIN_URL}/${cloudBinId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', 'X-Master-Key': masterKey },
-                    body: JSON.stringify({ recordsData, paymentsData })
-                }).then(()=> { document.getElementById('loading-bar').classList.add('hidden'); })
-                  .catch(e => console.error("背景同步失敗", e));
-            }
-
-            renderDashboard();
-            renderRecords();
-            if(!document.getElementById('payment-history-modal').classList.contains('hidden')){
-                renderPaymentHistory();
-            }
-        }
-
+        // --- 以下為 UI 操作函式 ---
         function switchTab(tabId) {
             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.tab-btn').forEach(el => {
@@ -567,27 +639,27 @@
             activeBtn.classList.add('border-book-900', 'text-book-900');
         }
 
-        function openModal(modalId, isEdit = false) { 
+        window.openModal = function(modalId, isEdit = false) { 
             document.getElementById(modalId).classList.remove('hidden'); 
             if (modalId === 'transaction-modal' && !isEdit) {
-                currentEditingId = null;
+                window.currentEditingId = null;
                 document.getElementById('modal-title').innerText = '新增帳目紀錄';
                 document.getElementById('add-transaction-form').reset();
                 document.getElementById('trans-date').value = new Date().toISOString().split('T')[0];
             }
-            if (modalId === 'payment-history-modal') renderPaymentHistory();
+            if (modalId === 'payment-history-modal') window.renderPaymentHistory();
             if (modalId === 'backup-modal') document.getElementById('import-textarea').value = '';
         }
 
-        function closeModal(modalId) {
+        window.closeModal = function(modalId) {
              document.getElementById(modalId).classList.add('hidden');
-             if (modalId === 'transaction-modal') { document.getElementById('add-transaction-form').reset(); currentEditingId = null; }
+             if (modalId === 'transaction-modal') { document.getElementById('add-transaction-form').reset(); window.currentEditingId = null; }
              if (modalId === 'settle-modal') document.getElementById('add-payment-form').reset();
         }
 
         // --- 資料匯出/還原功能 ---
-        function exportData() {
-            const data = { version: "1.0", recordsData, paymentsData };
+        window.exportData = function() {
+            const data = { version: "2.0", recordsData: window.recordsData, paymentsData: window.paymentsData };
             const dataStr = JSON.stringify(data, null, 2);
             const blob = new Blob([dataStr], {type: "application/json"});
             const url = URL.createObjectURL(blob);
@@ -598,40 +670,33 @@
             URL.revokeObjectURL(url);
         }
 
-        function importData() {
+        window.importData = async function() {
             const jsonStr = document.getElementById('import-textarea').value.trim();
             if (!jsonStr) { alert('請先貼上資料！'); return; }
             try {
                 const data = JSON.parse(jsonStr);
                 if (data.recordsData || data.paymentsData) {
-                    if(confirm('警告：這將會覆蓋您目前的所有的資料！確定要繼續嗎？')) {
-                        recordsData = data.recordsData || [];
-                        paymentsData = data.paymentsData || [];
-                        updateUI(true);
+                    if(confirm('警告：這將會完全覆蓋目前的資料！確定要繼續嗎？')) {
+                        await window.fbImportData(data.recordsData || [], data.paymentsData || []);
                         closeModal('backup-modal');
                         alert('資料還原成功！系統已更新。');
                     }
-                } else {
-                    alert('格式不正確，這不是有效的 JSON 備份檔。');
-                }
-            } catch (e) {
-                alert('解析失敗，請確認貼上的是正確的系統備份格式。');
-            }
+                } else { alert('格式不正確，這不是有效的 JSON 備份檔。'); }
+            } catch (e) { alert('解析失敗，請確認貼上的是正確的系統備份格式。'); }
         }
 
-        function deleteRecord(id) {
-            if(confirm('確定要刪除這筆紀錄嗎？')) {
-                recordsData = recordsData.filter(record => record.id !== id);
-                updateUI(true);
-            }
+        // 綁定編輯與刪除 (為了避免被渲染機制吃掉，綁在 window)
+        window.deleteRecord = async function(fbId, localId) {
+            if(confirm('確定要刪除這筆紀錄嗎？')) await window.fbDeleteRecord(fbId, localId);
         }
 
-        function editRecord(id) {
-            const record = recordsData.find(r => r.id === id);
+        window.editRecord = function(fbId, localId) {
+            const idToSearch = window.isCloudConnected ? fbId : localId;
+            const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
             if (!record) return;
 
-            currentEditingId = id;
-            openModal('transaction-modal', true);
+            window.currentEditingId = idToSearch; // 存目前的編輯 ID
+            window.openModal('transaction-modal', true);
             document.getElementById('modal-title').innerText = '編輯帳目紀錄';
             document.getElementById('trans-date').value = record.date;
             document.getElementById('trans-payer').value = record.payer || users[0];
@@ -643,8 +708,11 @@
             document.querySelectorAll('.trans-buyer-cb').forEach(cb => { cb.checked = record.buyers.includes(cb.value); });
         }
 
-        document.getElementById('add-transaction-form').addEventListener('submit', function(e) {
+        document.getElementById('add-transaction-form').addEventListener('submit', async function(e) {
             e.preventDefault();
+            const btn = document.getElementById('save-trans-btn');
+            btn.disabled = true; btn.innerText = "處理中...";
+
             const date = document.getElementById('trans-date').value;
             const payer = document.getElementById('trans-payer').value;
             const title = document.getElementById('trans-title').value;
@@ -654,79 +722,85 @@
             const checkedBoxes = document.querySelectorAll('.trans-buyer-cb:checked');
             const buyers = Array.from(checkedBoxes).map(cb => cb.value);
 
-            if (price > 0 && buyers.length === 0) { alert('請至少勾選一位參與分攤的人員！'); return; }
-            if (pointsEarned > 0 && buyers.length === 0) { alert('請至少勾選一位參與分配的人員！'); return; }
-            if (pointsUsed > price && price > 0) { alert('折抵不能大於總價！'); return; }
+            if (price > 0 && buyers.length === 0) { alert('請至少勾選一位參與分攤的人員！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+            if (pointsEarned > 0 && buyers.length === 0) { alert('請至少勾選一位參與分配的人員！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+            if (pointsUsed > price && price > 0) { alert('折抵不能大於總價！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
 
             let actualCashCost = Math.max(0, price - pointsUsed);
             let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
             let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
 
             const newRecord = {
-                id: currentEditingId ? currentEditingId : Date.now(),
+                id: window.currentEditingId && !window.isCloudConnected ? window.currentEditingId : Date.now(),
                 date, title, payer: (price > 0) ? payer : null, price, pointsUsed, pointsEarned, buyers, perPersonCash, perPersonPointsEarned
             };
 
-            if (currentEditingId) {
-                const index = recordsData.findIndex(r => r.id === currentEditingId);
-                if (index !== -1) recordsData[index] = newRecord;
-            } else {
-                recordsData.push(newRecord);
+            try {
+                if (window.currentEditingId) {
+                    await window.fbUpdateRecord(window.currentEditingId, newRecord);
+                } else {
+                    await window.fbAddRecord(newRecord);
+                }
+                closeModal('transaction-modal');
+            } catch (err) {
+                 alert("操作失敗，請重試");
+                 console.error(err);
             }
-
-            updateUI(true);
-            closeModal('transaction-modal');
+            btn.disabled = false; btn.innerText = "儲存紀錄";
         });
 
-        function openSettleModal(fromUser, toUser, amount) {
+        window.openSettleModal = function(fromUser, toUser, amount) {
             document.getElementById('payment-date').value = new Date().toISOString().split('T')[0];
             document.getElementById('payment-from').value = fromUser;
             document.getElementById('payment-to').value = toUser;
             document.getElementById('payment-amount').value = amount.toFixed(2);
-            openModal('settle-modal');
+            window.openModal('settle-modal');
         }
 
-        document.getElementById('add-payment-form').addEventListener('submit', function(e) {
+        document.getElementById('add-payment-form').addEventListener('submit', async function(e) {
             e.preventDefault();
+            const btn = document.getElementById('save-pay-btn');
+            btn.disabled = true; btn.innerText = "處理中...";
+
             const date = document.getElementById('payment-date').value;
             const from = document.getElementById('payment-from').value;
             const to = document.getElementById('payment-to').value;
             const amount = parseFloat(document.getElementById('payment-amount').value);
 
-            if (from === to) { alert('付款人與收款人不能是同一人！'); return; }
-            if (amount <= 0) { alert('金額必須大於0！'); return; }
+            if (from === to) { alert('付款人與收款人不能是同一人！'); btn.disabled=false; btn.innerText="確認標記"; return; }
+            if (amount <= 0) { alert('金額必須大於0！'); btn.disabled=false; btn.innerText="確認標記"; return; }
 
-            paymentsData.push({ id: Date.now(), date, from, to, amount });
-            updateUI(true);
-            closeModal('settle-modal');
+            try {
+                await window.fbAddPayment({ id: Date.now(), date, from, to, amount });
+                closeModal('settle-modal');
+            } catch (err) { alert("標記失敗"); }
+            btn.disabled = false; btn.innerText="確認標記";
         });
 
-        function deletePayment(id) {
-            if(confirm('確定要刪除這筆還款紀錄嗎？')) {
-                paymentsData = paymentsData.filter(p => p.id !== id);
-                updateUI(true);
-            }
+        window.deletePayment = async function(fbId, localId) {
+            if(confirm('確定要刪除這筆還款紀錄嗎？')) await window.fbDeletePayment(fbId, localId);
         }
 
-        function renderPaymentHistory() {
+        window.renderPaymentHistory = function() {
             const tbody = document.getElementById('payment-history-body');
-            if (paymentsData.length === 0) {
+            if (window.paymentsData.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何還款紀錄。</td></tr>`;
                 return;
             }
-            const sortedPayments = [...paymentsData].sort((a,b) => new Date(b.date) - new Date(a.date));
+            const sortedPayments = [...window.paymentsData].sort((a,b) => new Date(b.date) - new Date(a.date));
             tbody.innerHTML = sortedPayments.map(p => `
                 <tr class="hover:bg-book-50/50">
                     <td class="px-4 py-3 text-book-600">${p.date}</td>
                     <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="text-book-900">${p.from}</span><i class="ph ph-arrow-right text-emerald-600"></i><span class="text-book-900">${p.to}</span></div></td>
                     <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${p.amount.toFixed(2)}</td>
-                    <td class="px-4 py-3 text-center"><button onclick="deletePayment(${p.id})" class="text-book-400 hover:text-red-500 p-1"><i class="ph-fill ph-trash text-lg"></i></button></td>
+                    <td class="px-4 py-3 text-center"><button onclick="window.deletePayment('${p.fbId}', ${p.id})" class="text-book-400 hover:text-red-500 p-1"><i class="ph-fill ph-trash text-lg"></i></button></td>
                 </tr>
             `).join('');
         }
 
-        function viewTransactionDetail(id) {
-            const record = recordsData.find(r => r.id === id);
+        window.viewTransactionDetail = function(fbId, localId) {
+            const idToSearch = window.isCloudConnected ? fbId : localId;
+            const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
             if (!record) return;
 
             document.getElementById('tx-detail-date').innerText = record.date;
@@ -749,35 +823,35 @@
                 </div>
             `).join('');
             document.getElementById('tx-detail-buyers-list').innerHTML = record.buyers.length > 0 ? buyersListHtml : '<p class="text-book-400 text-sm italic">無參與者</p>';
-            openModal('tx-detail-modal');
+            window.openModal('tx-detail-modal');
         }
 
-        function viewUserDetail(userName) {
+        window.viewUserDetail = function(userName) {
             let expense = 0, paid = 0, points = 0, settledSent = 0, settledRecv = 0;
             let userHistory = []; 
             
-            recordsData.forEach(r => {
+            window.recordsData.forEach(r => {
                 const isPayer = r.payer === userName;
                 const isBuyer = r.buyers && r.buyers.includes(userName);
                 if (isPayer) paid += (r.price || 0);
                 if (isBuyer) { expense += (r.perPersonCash || 0); points += (r.perPersonPointsEarned || 0); }
                 if (isPayer || isBuyer) {
                     userHistory.push({
-                        type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + r.id, 
+                        type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + (r.price*100), 
                         title: r.title, isPayer, isBuyer, myExpense: isBuyer ? r.perPersonCash : 0,
                         myPaid: isPayer ? r.price : 0, myPoints: isBuyer ? r.perPersonPointsEarned : 0
                     });
                 }
             });
 
-            paymentsData.forEach(p => {
+            window.paymentsData.forEach(p => {
                 const isSender = p.from === userName;
                 const isReceiver = p.to === userName;
                 if (isSender) settledSent += p.amount;
                 if (isReceiver) settledRecv += p.amount;
                 if (isSender || isReceiver) {
                     userHistory.push({
-                        type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + p.id,
+                        type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + (p.amount*10),
                         title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
                         isSender, isReceiver, amount: p.amount
                     });
@@ -828,18 +902,18 @@
                     </tr>`;
                 }).join('');
             }
-            openModal('user-detail-modal');
+            window.openModal('user-detail-modal');
         }
 
-        function applyFilter() { renderRecords(); }
-        function clearFilter() { document.getElementById('filter-start').value = ''; document.getElementById('filter-end').value = ''; renderRecords(); }
+        window.applyFilter = function() { window.renderRecords(); }
+        window.clearFilter = function() { document.getElementById('filter-start').value = ''; document.getElementById('filter-end').value = ''; window.renderRecords(); }
 
-        function renderDashboard() {
+        window.renderDashboard = function() {
             let totalPoints = 0;
             let accounts = {};
             users.forEach(u => accounts[u] = { expense: 0, paid: 0, points: 0, settledSent: 0, settledRecv: 0 });
 
-            recordsData.forEach(record => {
+            window.recordsData.forEach(record => {
                 totalPoints += (record.pointsEarned || 0); totalPoints -= (record.pointsUsed || 0);
                 if (record.payer && accounts[record.payer]) accounts[record.payer].paid += (record.price || 0);
                 if (record.buyers && record.buyers.length > 0) {
@@ -853,7 +927,7 @@
             });
             document.getElementById('dash-total-points').innerText = totalPoints.toFixed(2);
 
-            paymentsData.forEach(payment => {
+            window.paymentsData.forEach(payment => {
                 if (accounts[payment.from]) accounts[payment.from].settledSent += payment.amount;
                 if (accounts[payment.to]) accounts[payment.to].settledRecv += payment.amount;
             });
@@ -891,7 +965,7 @@
                             <span class="text-book-900">${t.to}</span>
                             <span class="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm ml-2">應付 $${t.amount.toFixed(2)}</span>
                         </div>
-                        <button onclick="openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
+                        <button onclick="window.openSettleModal('${t.from}', '${t.to}', ${t.amount})" class="w-full sm:w-auto bg-emerald-600 text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm flex justify-center items-center gap-1">
                             <i class="ph ph-money"></i> 紀錄部分/全額還款
                         </button>
                     </div>
@@ -907,7 +981,7 @@
                 else statusHtml = `<span class="text-xs font-medium text-book-600 bg-book-100 px-2 py-1 rounded border border-book-200">已結清</span>`;
 
                 return `
-                <div onclick="viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
+                <div onclick="window.viewUserDetail('${user}')" class="cursor-pointer bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden flex flex-col transform transition-all duration-200 hover:-translate-y-1 hover:shadow-md hover:border-book-400 group">
                     <div class="p-4 border-b border-book-100 flex items-center justify-between bg-book-50/50 group-hover:bg-book-100/50 transition-colors">
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full bg-book-200 text-book-900 flex items-center justify-center font-serif font-bold text-lg shadow-inner group-hover:bg-book-900 group-hover:text-white transition-colors">${user.charAt(0)}</div>
@@ -951,17 +1025,17 @@
             }
         }
 
-        function renderRecords() {
+        window.renderRecords = function() {
             const tbody = document.getElementById('records-table-body');
             const startDate = document.getElementById('filter-start').value;
             const endDate = document.getElementById('filter-end').value;
 
-            let filteredRecords = [...recordsData];
+            let filteredRecords = [...window.recordsData];
             if (startDate) filteredRecords = filteredRecords.filter(r => r.date >= startDate);
             if (endDate) filteredRecords = filteredRecords.filter(r => r.date <= endDate);
 
             if (filteredRecords.length === 0) {
-                const message = recordsData.length === 0 ? "尚無任何紀錄，點擊右上角新增吧！" : "此區間查無紀錄。";
+                const message = window.recordsData.length === 0 ? "尚無任何紀錄，點擊右上角新增吧！" : "此區間查無紀錄。";
                 tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-12 text-center text-book-300 font-serif italic">${message}</td></tr>`;
                 return;
             }
@@ -971,7 +1045,7 @@
             tbody.innerHTML = sortedRecords.map(record => {
                 const isOnlyPoints = record.price === 0 && record.pointsEarned > 0;
                 return `
-                <tr onclick="viewTransactionDetail(${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
+                <tr onclick="window.viewTransactionDetail('${record.fbId}', ${record.id})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-book-600">${record.date}</td>
                     <td class="px-4 py-3 text-sm font-serif font-bold text-book-900">${record.title}${isOnlyPoints ? `<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>` : ''}</td>
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${record.payer}</span>` : '-'}</td>
@@ -980,14 +1054,13 @@
                     <td class="px-4 py-3 text-sm text-book-800"><div class="flex flex-wrap gap-1">${record.buyers.length > 0 ? record.buyers.map(b => `<span class="px-2 py-0.5 bg-book-100 border border-book-200 rounded text-xs">${b}</span>`).join('') : '-'}</div></td>
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${record.perPersonPointsEarned.toFixed(2)} 點</div>` : ''}</td>
                     <td class="px-4 py-3 whitespace-nowrap text-center">
-                        <button onclick="event.stopPropagation(); editRecord(${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
-                        <button onclick="event.stopPropagation(); deleteRecord(${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
+                        <button onclick="event.stopPropagation(); window.editRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+                        <button onclick="event.stopPropagation(); window.deleteRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
                     </td>
                 </tr>`;
             }).join('');
         }
 
-        init();
     </script>
 </body>
 </html>
