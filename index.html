@@ -18,7 +18,7 @@
 
         // 公用開放測試資料庫 (免驗證、無 CORS 限制)
         const firebaseConfig = {
-            databaseURL: "https://boolhepler-default-rtdb.asia-southeast1.firebasedatabase.app/" // 替換為實際的、開放的測試用 RTDB
+            databaseURL: "https://boolhepler-default-rtdb.asia-southeast1.firebasedatabase.app/" 
         };
 
         let roomId = window.location.hostname.replace(/\./g, '_');
@@ -151,8 +151,6 @@
                  const statusEl = document.getElementById('cloud-status');
                  statusEl.innerHTML = '<i class="ph-bold ph-spinner animate-spin text-blue-500"></i> 上傳資料中...';
                  
-                 // 因為我們使用的是 RTDB，可以直接 set 整個節點來覆蓋
-                 // 轉換為 RTDB 的格式 { id: { data }, id2: { data } }
                  const updates = {};
                  
                  // 處理 records
@@ -214,7 +212,7 @@
                     <i class="ph-fill ph-books text-2xl text-book-600"></i>
                     <span class="font-serif font-bold text-xl tracking-wide">書友帳房總覽</span>
                     
-                    <!-- 雲端狀態指示器 (由 Firebase 控制) -->
+                    <!-- 雲端狀態指示器 -->
                     <span id="cloud-status" class="text-xs ml-2 bg-book-50 px-3 py-1.5 rounded-full border border-book-200 flex items-center gap-1.5 shadow-inner">
                         <i class="ph ph-spinner animate-spin text-book-400"></i> 正在連線資料庫...
                     </span>
@@ -240,7 +238,6 @@
         <!-- 頁籤 1: 結帳總覽 Dashboard -->
         <div id="view-dashboard" class="view-section fade-in block">
             
-            <!-- 共用點數卡片 -->
             <div class="bg-book-900 rounded-xl shadow-md p-6 mb-8 border-t-4 border-book-600 overflow-hidden relative">
                 <div class="flex flex-col relative z-10">
                     <p class="text-book-300 text-sm font-medium mb-1 tracking-widest font-sans">藏書閣共用點數餘額</p>
@@ -252,7 +249,6 @@
                 <i class="ph-fill ph-book-bookmark absolute -right-6 -bottom-8 text-[10rem] text-white opacity-5 pointer-events-none"></i>
             </div>
 
-            <!-- 自動結算 -->
             <div class="mb-8">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                     <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 flex items-center gap-2">
@@ -267,7 +263,6 @@
                 </div>
             </div>
 
-            <!-- 個人帳戶總覽 -->
             <h2 class="text-xl font-serif font-bold text-book-900 border-l-4 border-book-600 pl-3 mb-4 flex items-center justify-between">
                 <span>個人帳戶明細</span>
                 <span class="text-sm text-book-400 font-sans font-normal italic">💡 點擊卡片可查看個人紀錄</span>
@@ -295,20 +290,20 @@
                 </button>
             </div>
 
+            <!-- 加入書名搜尋功能的區塊 -->
             <div class="bg-white rounded-xl shadow-sm border border-book-200 p-4 mb-4 flex flex-col gap-3">
                 <div class="flex flex-col md:flex-row gap-4 items-end">
-                    <!-- 新增：搜尋關鍵字框 -->
                     <div class="flex-grow w-full md:w-auto">
                         <label class="block text-xs font-medium text-book-800 mb-1">搜尋書名 / 項目</label>
                         <div class="relative">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <i class="ph ph-magnifying-glass text-book-400 text-lg"></i>
                             </div>
-                            <input type="text" id="filter-search" placeholder="輸入書名關鍵字..." class="w-full pl-10 border border-book-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-book-600 outline-none transition-all" oninput="applyFilter()">
+                            <!-- 輸入文字時自動觸發 applyFilter() -->
+                            <input type="text" id="filter-search" placeholder="輸入書名關鍵字..." class="w-full pl-10 border border-book-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-book-600 outline-none transition-all" oninput="window.applyFilter()">
                         </div>
                     </div>
                     
-                    <!-- 日期區間 -->
                     <div class="flex gap-2 w-full md:w-auto">
                         <div class="flex-1 md:w-36">
                             <label class="block text-xs font-medium text-book-800 mb-1">開始日期</label>
@@ -320,12 +315,11 @@
                         </div>
                     </div>
 
-                    <!-- 按鈕群 -->
                     <div class="flex gap-2 w-full md:w-auto">
-                        <button onclick="applyFilter()" class="flex-1 md:flex-none bg-book-100 hover:bg-book-200 text-book-800 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-book-300">
+                        <button onclick="window.applyFilter()" class="flex-1 md:flex-none bg-book-100 hover:bg-book-200 text-book-800 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-book-300">
                             查詢
                         </button>
-                        <button onclick="clearFilter()" class="flex-1 md:flex-none bg-white hover:bg-gray-50 text-gray-500 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-gray-200">
+                        <button onclick="window.clearFilter()" class="flex-1 md:flex-none bg-white hover:bg-gray-50 text-gray-500 px-4 py-2 rounded-md text-sm font-medium transition-colors border border-gray-200">
                             清除
                         </button>
                     </div>
@@ -355,8 +349,7 @@
         </div>
     </main>
 
-    <!-- Modal 區域 -->
-    <!-- 新增紀錄 -->
+    <!-- Modal: 新增/編輯購書紀錄 -->
     <div id="transaction-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-book-200 my-8 relative z-50">
             <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10">
@@ -365,19 +358,41 @@
             </div>
             <form id="add-transaction-form" class="p-6 space-y-5">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><label class="block text-sm font-medium text-book-800 mb-1">日期</label><input type="date" id="trans-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white"></div>
-                    <div><label class="block text-sm font-medium text-book-800 mb-1">誰刷卡代墊的？</label><select id="trans-payer" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white"></select></div>
+                    <div>
+                        <label class="block text-sm font-medium text-book-800 mb-1">日期</label>
+                        <input type="date" id="trans-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-book-800 mb-1">誰刷卡代墊的？</label>
+                        <select id="trans-payer" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans bg-white">
+                        </select>
+                    </div>
                 </div>
-                <div><label class="block text-sm font-medium text-book-800 mb-1">項目名稱 (書名 / 活動名稱)</label><input type="text" id="trans-title" placeholder="例如：晚安,布布 1 或 9月儲值回饋" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans"></div>
+                <div>
+                    <label class="block text-sm font-medium text-book-800 mb-1">項目名稱 (書名 / 活動名稱)</label>
+                    <input type="text" id="trans-title" placeholder="例如：晚安,布布 1 或 9月儲值回饋" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans">
+                </div>
                 <div class="p-4 bg-book-100/50 rounded-lg border border-book-200 space-y-4">
                     <h4 class="text-sm font-bold text-book-900 font-serif border-b border-book-200 pb-2">金額與點數細節</h4>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div><label class="block text-xs font-medium text-book-800 mb-1">總價 (應付現金)</label><input type="number" id="trans-price" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0"></div>
-                        <div><label class="block text-xs font-medium text-book-800 mb-1">使用點數折抵 (-)</label><input type="number" id="trans-points-used" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0"></div>
+                        <div>
+                            <label class="block text-xs font-medium text-book-800 mb-1">總價 (應付現金)</label>
+                            <input type="number" id="trans-price" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-book-800 mb-1">使用點數折抵 (-)</label>
+                            <input type="number" id="trans-points-used" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none font-sans" value="0">
+                        </div>
                     </div>
-                    <div><label class="block text-xs font-medium text-book-800 mb-1">獲得點數 (+)</label><input type="number" id="trans-points-earned" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-sans" value="0"></div>
+                    <div>
+                        <label class="block text-xs font-medium text-book-800 mb-1">獲得點數 (+)</label>
+                        <input type="number" id="trans-points-earned" step="0.01" placeholder="0" class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-sans" value="0">
+                    </div>
                 </div>
-                <div><label class="block text-sm font-medium text-book-800 mb-2">誰有參與這筆帳？</label><div class="grid grid-cols-2 gap-3" id="trans-buyers-checkboxes"></div></div>
+                <div>
+                    <label class="block text-sm font-medium text-book-800 mb-2">誰有參與這筆帳？</label>
+                    <div class="grid grid-cols-2 gap-3" id="trans-buyers-checkboxes"></div>
+                </div>
                 <div class="pt-2 flex gap-3">
                     <button type="button" onclick="closeModal('transaction-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50 transition-colors">取消</button>
                     <button type="submit" id="save-trans-btn" class="flex-1 bg-book-900 text-white py-2.5 rounded-md font-medium hover:bg-book-800 transition-colors shadow-sm">儲存紀錄</button>
@@ -386,87 +401,169 @@
         </div>
     </div>
 
-    <!-- 還款紀錄 -->
+    <!-- Modal: 新增還款紀錄 -->
     <div id="settle-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border border-book-200">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center"><h3 class="text-lg font-serif font-bold text-book-900">紀錄還款金額</h3><button onclick="closeModal('settle-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
+            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
+                <h3 class="text-lg font-serif font-bold text-book-900">紀錄還款金額</h3>
+                <button onclick="closeModal('settle-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+            </div>
             <form id="add-payment-form" class="p-6 space-y-4">
-                <div><label class="block text-sm font-medium text-book-800 mb-1">還款日期</label><input type="date" id="payment-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-white"></div>
+                <div>
+                    <label class="block text-sm font-medium text-book-800 mb-1">還款日期</label>
+                    <input type="date" id="payment-date" required class="w-full border border-book-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-white">
+                </div>
                 <div class="flex items-center gap-2">
-                    <div class="flex-1"><label class="block text-xs font-medium text-book-800 mb-1">付款人 (還錢者)</label><select id="payment-from" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select></div>
+                    <div class="flex-1">
+                        <label class="block text-xs font-medium text-book-800 mb-1">付款人 (還錢者)</label>
+                        <select id="payment-from" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select>
+                    </div>
                     <i class="ph-bold ph-arrow-right text-book-400 mt-5"></i>
-                    <div class="flex-1"><label class="block text-xs font-medium text-book-800 mb-1">收款人 (收錢者)</label><select id="payment-to" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select></div>
+                    <div class="flex-1">
+                        <label class="block text-xs font-medium text-book-800 mb-1">收款人 (收錢者)</label>
+                        <select id="payment-to" class="w-full border border-book-200 rounded-md px-2 py-2 focus:ring-2 focus:ring-book-600 outline-none bg-book-50 text-book-900"></select>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-book-800 mb-1">實際還款/預繳金額</label>
-                    <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3 text-book-500 font-mono">$</span><input type="number" id="payment-amount" step="0.01" required min="0.01" class="w-full border border-book-200 rounded-md pl-7 pr-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-mono font-bold text-lg text-book-900"></div>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-book-500 font-mono">$</span>
+                        <input type="number" id="payment-amount" step="0.01" required min="0.01" class="w-full border border-book-200 rounded-md pl-7 pr-3 py-2 focus:ring-2 focus:ring-emerald-600 outline-none font-mono font-bold text-lg text-book-900">
+                    </div>
                     <p class="text-xs text-book-500 mt-2 leading-relaxed">可填寫部分金額或全額。<br>若<span class="text-emerald-600 font-medium">多繳(溢繳)</span>，系統會自動記錄為預繳金，於未來購書時自動扣除。</p>
                 </div>
-                <div class="pt-4 flex gap-3"><button type="button" onclick="closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button><button type="submit" id="save-pay-btn" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button></div>
+                <div class="pt-4 flex gap-3">
+                    <button type="button" onclick="closeModal('settle-modal')" class="flex-1 bg-white border border-book-300 text-book-800 py-2.5 rounded-md font-medium hover:bg-book-50">取消</button>
+                    <button type="submit" id="save-pay-btn" class="flex-1 bg-emerald-700 text-white py-2.5 rounded-md font-medium hover:bg-emerald-800 shadow-sm">確認標記</button>
+                </div>
             </form>
         </div>
     </div>
 
-    <!-- 歷史還款紀錄清單 -->
+    <!-- Modal: 全域歷史還款紀錄清單 -->
     <div id="payment-history-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-book-200 flex flex-col max-h-[80vh]">
-            <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-center sticky top-0"><h3 class="text-xl font-serif font-bold text-book-900">全域歷史還款紀錄</h3><button onclick="closeModal('payment-history-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
+            <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-center sticky top-0">
+                <h3 class="text-xl font-serif font-bold text-book-900">全域歷史還款紀錄</h3>
+                <button onclick="closeModal('payment-history-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+            </div>
             <div class="flex-1 overflow-y-auto p-0 no-scrollbar">
                 <table class="min-w-full divide-y divide-book-100">
-                    <thead class="bg-book-50/50 sticky top-0"><tr><th class="px-4 py-3 text-left text-xs font-medium text-book-500">日期</th><th class="px-4 py-3 text-left text-xs font-medium text-book-500">還款流向</th><th class="px-4 py-3 text-right text-xs font-medium text-book-500">金額</th><th class="px-4 py-3 text-center text-xs font-medium text-book-500">操作</th></tr></thead>
+                    <thead class="bg-book-50/50 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-book-500">日期</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-book-500">還款流向</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-book-500">金額</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-book-500">操作</th>
+                        </tr>
+                    </thead>
                     <tbody id="payment-history-body" class="divide-y divide-book-100 text-sm"></tbody>
                 </table>
             </div>
-            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end"><button onclick="closeModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100">關閉</button></div>
+            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
+                <button onclick="closeModal('payment-history-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100">關閉</button>
+            </div>
         </div>
     </div>
 
-    <!-- 單筆明細詳細檢視 -->
+    <!-- Modal: 單筆明細詳細檢視 -->
     <div id="tx-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-book-200 my-8 flex flex-col">
             <div class="px-6 py-4 bg-book-50 border-b border-book-200 flex justify-between items-start">
-                <div><span id="tx-detail-date" class="text-xs text-book-500 font-medium mb-1 block"></span><h3 id="tx-detail-title" class="text-xl font-serif font-bold text-book-900"></h3></div>
+                <div>
+                    <span id="tx-detail-date" class="text-xs text-book-500 font-medium mb-1 block"></span>
+                    <h3 id="tx-detail-title" class="text-xl font-serif font-bold text-book-900"></h3>
+                </div>
                 <button onclick="closeModal('tx-detail-modal')" class="text-book-400 hover:text-book-800 mt-1"><i class="ph ph-x text-xl"></i></button>
             </div>
             <div class="p-6 space-y-6 flex-1">
                 <div class="grid grid-cols-2 gap-4 text-sm">
-                    <div class="bg-book-50 p-3 rounded-lg border border-book-100"><span class="block text-book-500 mb-1">代墊人</span><span id="tx-detail-payer" class="font-bold text-book-900"></span></div>
-                    <div class="bg-book-50 p-3 rounded-lg border border-book-100"><span class="block text-book-500 mb-1">參與人數</span><span id="tx-detail-buyer-count" class="font-bold text-book-900"></span></div>
+                    <div class="bg-book-50 p-3 rounded-lg border border-book-100">
+                        <span class="block text-book-500 mb-1">代墊人</span>
+                        <span id="tx-detail-payer" class="font-bold text-book-900"></span>
+                    </div>
+                    <div class="bg-book-50 p-3 rounded-lg border border-book-100">
+                        <span class="block text-book-500 mb-1">參與人數</span>
+                        <span id="tx-detail-buyer-count" class="font-bold text-book-900"></span>
+                    </div>
                 </div>
                 <div class="space-y-2 border-t border-book-100 pt-4 text-sm">
-                    <div class="flex justify-between"><span class="text-book-600">總價</span><span id="tx-detail-price" class="font-mono font-bold text-book-900"></span></div>
-                    <div class="flex justify-between"><span class="text-book-600">使用點數折抵</span><span id="tx-detail-points-used" class="font-mono text-red-500"></span></div>
-                    <div class="flex justify-between"><span class="text-book-600">獲得新點數</span><span id="tx-detail-points-earned" class="font-mono text-emerald-600 font-bold"></span></div>
+                    <div class="flex justify-between">
+                        <span class="text-book-600">總價</span>
+                        <span id="tx-detail-price" class="font-mono font-bold text-book-900"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-book-600">使用點數折抵</span>
+                        <span id="tx-detail-points-used" class="font-mono text-red-500"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-book-600">獲得新點數</span>
+                        <span id="tx-detail-points-earned" class="font-mono text-emerald-600 font-bold"></span>
+                    </div>
                     <div class="h-px bg-book-200 my-2"></div>
-                    <div class="flex justify-between text-base"><span class="font-bold text-book-900">實際需付現金</span><span id="tx-detail-actual-cash" class="font-mono font-bold text-book-900"></span></div>
+                    <div class="flex justify-between text-base">
+                        <span class="font-bold text-book-900">實際需付現金</span>
+                        <span id="tx-detail-actual-cash" class="font-mono font-bold text-book-900"></span>
+                    </div>
                 </div>
-                <div><h4 class="text-sm font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-2">參與者分攤明細</h4><div id="tx-detail-buyers-list" class="space-y-2"></div></div>
+                
+                <div>
+                    <h4 class="text-sm font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-2">參與者分攤明細</h4>
+                    <div id="tx-detail-buyers-list" class="space-y-2"></div>
+                </div>
             </div>
-            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end"><button onclick="closeModal('tx-detail-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100 transition-colors">關閉</button></div>
+            <div class="p-4 border-t border-book-100 bg-book-50 flex justify-end">
+                <button onclick="closeModal('tx-detail-modal')" class="bg-white border border-book-300 text-book-800 px-6 py-2 rounded-md text-sm font-medium hover:bg-book-100 transition-colors">關閉</button>
+            </div>
         </div>
     </div>
 
-    <!-- 個人專屬帳戶明細 -->
+    <!-- Modal: 個人專屬帳戶明細 -->
     <div id="user-detail-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden border border-book-200 my-8 flex flex-col h-[85vh]">
             <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center sticky top-0 z-10 shadow-sm">
-                <div class="flex items-center gap-3"><div id="user-detail-avatar" class="w-10 h-10 rounded-full bg-book-900 text-white flex items-center justify-center font-serif font-bold text-lg shadow-inner"></div><h3 class="text-xl font-serif font-bold text-book-900"><span id="user-detail-name"></span> 的專屬帳房</h3></div>
+                <div class="flex items-center gap-3">
+                    <div id="user-detail-avatar" class="w-10 h-10 rounded-full bg-book-900 text-white flex items-center justify-center font-serif font-bold text-lg shadow-inner"></div>
+                    <h3 class="text-xl font-serif font-bold text-book-900"><span id="user-detail-name"></span> 的專屬帳房</h3>
+                </div>
                 <button onclick="closeModal('user-detail-modal')" class="text-book-400 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
             </div>
+            
             <div class="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm"><span class="block text-xs text-book-500 mb-1">應付帳單總額</span><span id="user-detail-expense" class="text-xl font-mono font-bold text-red-600"></span></div>
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm"><span class="block text-xs text-book-500 mb-1">代墊支出總額</span><span id="user-detail-paid" class="text-xl font-mono font-bold text-blue-600"></span></div>
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm"><span class="block text-xs text-book-500 mb-1">目前淨結餘</span><div id="user-detail-balance" class="text-lg font-bold"></div></div>
-                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm"><span class="block text-xs text-book-500 mb-1">貢獻/獲得點數</span><span id="user-detail-points" class="text-xl font-mono font-bold text-emerald-600"></span></div>
+                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+                        <span class="block text-xs text-book-500 mb-1">應付帳單總額</span>
+                        <span id="user-detail-expense" class="text-xl font-mono font-bold text-red-600"></span>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+                        <span class="block text-xs text-book-500 mb-1">代墊支出總額</span>
+                        <span id="user-detail-paid" class="text-xl font-mono font-bold text-blue-600"></span>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+                        <span class="block text-xs text-book-500 mb-1">目前淨結餘</span>
+                        <div id="user-detail-balance" class="text-lg font-bold"></div>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-book-200 shadow-sm">
+                        <span class="block text-xs text-book-500 mb-1">貢獻/獲得點數</span>
+                        <span id="user-detail-points" class="text-xl font-mono font-bold text-emerald-600"></span>
+                    </div>
                 </div>
+
                 <div>
                     <h4 class="text-lg font-serif font-bold text-book-900 mb-3 border-l-4 border-book-600 pl-3">帳戶異動明細</h4>
                     <div class="bg-white rounded-xl shadow-sm border border-book-200 overflow-hidden">
                         <div class="overflow-x-auto">
                             <table class="min-w-full divide-y divide-book-100">
-                                <thead class="bg-book-50"><tr><th class="px-4 py-3 text-left text-xs font-medium text-book-800">日期 / 項目</th><th class="px-4 py-3 text-center text-xs font-medium text-book-800">角色</th><th class="px-4 py-3 text-right text-xs font-medium text-book-800">帳單分攤</th><th class="px-4 py-3 text-right text-xs font-medium text-book-800">實際金流</th></tr></thead>
-                                <tbody id="user-detail-records-body" class="bg-white divide-y divide-book-100 text-sm"></tbody>
+                                <thead class="bg-book-50">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-book-800">日期 / 項目</th>
+                                        <th class="px-4 py-3 text-center text-xs font-medium text-book-800">角色</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="自己實際上應該負擔的成本">帳單分攤</th>
+                                        <th class="px-4 py-3 text-right text-xs font-medium text-book-800" title="實際掏出或收回的現金">實際金流</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-detail-records-body" class="bg-white divide-y divide-book-100 text-sm">
+                                </tbody>
                             </table>
                         </div>
                     </div>
@@ -475,19 +572,30 @@
         </div>
     </div>
 
-    <!-- 資料匯入 (CSV) -->
+    <!-- Modal: 資料匯入 (CSV) -->
     <div id="backup-modal" class="fixed inset-0 bg-book-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-book-50 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-book-200">
-            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center"><h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2"><i class="ph ph-database text-book-600"></i> 資料批次匯入設定</h3><button onclick="closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button></div>
+            <div class="px-6 py-4 bg-white border-b border-book-200 flex justify-between items-center">
+                <h3 class="text-lg font-serif font-bold text-book-900 flex items-center gap-2"><i class="ph ph-database text-book-600"></i> 資料批次匯入設定</h3>
+                <button onclick="closeModal('backup-modal')" class="text-book-300 hover:text-book-800"><i class="ph ph-x text-xl"></i></button>
+            </div>
             <div class="p-6 space-y-6">
                 <div class="bg-emerald-50 p-5 rounded-lg border border-emerald-200">
                     <h4 class="font-bold text-emerald-900 mb-2 flex items-center gap-2"><i class="ph-fill ph-file-csv text-xl"></i> 📂 批次匯入 CSV</h4>
                     <p class="text-sm text-emerald-700 mb-4">系統會自動抓取您上傳的 CSV 中的「書名」、「活動價」以及「誰有買」。</p>
                     <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div><label class="block text-xs font-medium text-emerald-800 mb-1">這批訂單的預設購買日期</label><input type="date" id="csv-import-date" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white"></div>
-                        <div><label class="block text-xs font-medium text-emerald-800 mb-1">預設代墊人</label><select id="csv-import-payer" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white"></select></div>
+                        <div>
+                            <label class="block text-xs font-medium text-emerald-800 mb-1">這批訂單的預設購買日期</label>
+                            <input type="date" id="csv-import-date" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-emerald-800 mb-1">預設代墊人</label>
+                            <select id="csv-import-payer" class="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 outline-none bg-white"></select>
+                        </div>
                     </div>
-                    <div class="flex items-center gap-3"><input type="file" id="csv-upload-input" accept=".csv" class="block w-full text-sm text-emerald-800 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer border border-emerald-200 rounded-md bg-white"></div>
+                    <div class="flex items-center gap-3">
+                        <input type="file" id="csv-upload-input" accept=".csv" class="block w-full text-sm text-emerald-800 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer border border-emerald-200 rounded-md bg-white">
+                    </div>
                 </div>
             </div>
         </div>
@@ -523,7 +631,10 @@
 
         window.switchTab = function(tabId) {
             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('border-book-900', 'text-book-900'); el.classList.add('border-transparent', 'text-book-300'); });
+            document.querySelectorAll('.tab-btn').forEach(el => {
+                el.classList.remove('border-book-900', 'text-book-900');
+                el.classList.add('border-transparent', 'text-book-300');
+            });
             document.getElementById(`view-${tabId}`).classList.remove('hidden');
             const activeBtn = document.getElementById(`tab-${tabId}`);
             activeBtn.classList.remove('border-transparent', 'text-book-300');
@@ -548,6 +659,7 @@
              if (modalId === 'settle-modal') document.getElementById('add-payment-form').reset();
         }
 
+        // --- CSV 解析與雲端寫入 ---
         function setupCSVUploader() {
             const fileInput = document.getElementById('csv-upload-input');
             fileInput.addEventListener('change', function(e) {
@@ -757,13 +869,13 @@
 
         window.renderRecords = function() {
             const tbody = document.getElementById('records-table-body');
-            const searchKeyword = document.getElementById('filter-search').value.trim().toLowerCase();
+            const searchInput = document.getElementById('filter-search');
+            const searchKeyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
             const startDate = document.getElementById('filter-start').value;
             const endDate = document.getElementById('filter-end').value;
 
             let filteredRecords = [...window.recordsData];
             
-            // 關鍵字搜尋過濾
             if (searchKeyword) {
                 filteredRecords = filteredRecords.filter(r => r.title.toLowerCase().includes(searchKeyword));
             }
@@ -781,7 +893,7 @@
             tbody.innerHTML = sortedRecords.map(record => {
                 const isOnlyPoints = record.price === 0 && record.pointsEarned > 0;
                 
-                // 如果有搜尋字串，幫符合的文字加上背景色高光
+                // 關鍵字高光標記
                 let displayTitle = record.title;
                 if (searchKeyword) {
                     const regex = new RegExp(`(${searchKeyword})`, "gi");
@@ -799,10 +911,218 @@
                     <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono"><div class="font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-500 mt-0.5">+ ${record.perPersonPointsEarned.toFixed(2)} 點</div>` : ''}</td>
                     <td class="px-4 py-3 whitespace-nowrap text-center">
                         <button onclick="event.stopPropagation(); window.editRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 mr-1"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
-                        <button onclick="event.stopPropagation(); if(confirm('確定要刪除嗎？')) window.fbDeleteRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
+                        <button onclick="event.stopPropagation(); window.fbDeleteRecord('${record.fbId}', ${record.id})" class="text-book-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"><i class="ph-fill ph-trash text-lg"></i></button>
                     </td>
                 </tr>`;
             }).join('');
+        }
+
+        window.editRecord = function(fbId, localId) {
+            const idToSearch = window.isCloudConnected ? fbId : localId;
+            const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
+            if (!record) return;
+
+            window.currentEditingId = idToSearch; 
+            window.openModal('transaction-modal', true);
+            document.getElementById('modal-title').innerText = '編輯帳目紀錄';
+            document.getElementById('trans-date').value = record.date;
+            document.getElementById('trans-payer').value = record.payer || users[0];
+            document.getElementById('trans-title').value = record.title;
+            document.getElementById('trans-price').value = record.price;
+            document.getElementById('trans-points-used').value = record.pointsUsed;
+            document.getElementById('trans-points-earned').value = record.pointsEarned;
+
+            document.querySelectorAll('.trans-buyer-cb').forEach(cb => { cb.checked = record.buyers.includes(cb.value); });
+        }
+
+        document.getElementById('add-transaction-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('save-trans-btn');
+            btn.disabled = true; btn.innerText = "處理中...";
+
+            const date = document.getElementById('trans-date').value;
+            const payer = document.getElementById('trans-payer').value;
+            const title = document.getElementById('trans-title').value;
+            const price = parseFloat(document.getElementById('trans-price').value) || 0;
+            const pointsUsed = parseFloat(document.getElementById('trans-points-used').value) || 0;
+            const pointsEarned = parseFloat(document.getElementById('trans-points-earned').value) || 0;
+            const checkedBoxes = document.querySelectorAll('.trans-buyer-cb:checked');
+            const buyers = Array.from(checkedBoxes).map(cb => cb.value);
+
+            if (price > 0 && buyers.length === 0) { alert('請至少勾選一位參與分攤的人員！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+            if (pointsEarned > 0 && buyers.length === 0) { alert('請至少勾選一位參與分配的人員！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+            if (pointsUsed > price && price > 0) { alert('折抵不能大於總價！'); btn.disabled=false; btn.innerText="儲存紀錄"; return; }
+
+            let actualCashCost = Math.max(0, price - pointsUsed);
+            let perPersonCash = buyers.length > 0 ? (actualCashCost / buyers.length) : 0;
+            let perPersonPointsEarned = buyers.length > 0 ? (pointsEarned / buyers.length) : 0;
+
+            const newRecord = {
+                id: window.currentEditingId && !window.isCloudConnected ? window.currentEditingId : Date.now(),
+                date, title, payer: (price > 0) ? payer : null, price, pointsUsed, pointsEarned, buyers, perPersonCash, perPersonPointsEarned
+            };
+
+            try {
+                if (window.currentEditingId) {
+                    await window.fbUpdateRecord(window.currentEditingId, newRecord);
+                } else {
+                    await window.fbAddRecord(newRecord);
+                }
+                closeModal('transaction-modal');
+            } catch (err) { alert("操作失敗，請重試"); console.error(err); }
+            btn.disabled = false; btn.innerText = "儲存紀錄";
+        });
+
+        window.openSettleModal = function(fromUser, toUser, amount) {
+            document.getElementById('payment-date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('payment-from').value = fromUser;
+            document.getElementById('payment-to').value = toUser;
+            document.getElementById('payment-amount').value = amount.toFixed(2);
+            window.openModal('settle-modal');
+        }
+
+        document.getElementById('add-payment-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('save-pay-btn');
+            btn.disabled = true; btn.innerText = "處理中...";
+
+            const date = document.getElementById('payment-date').value;
+            const from = document.getElementById('payment-from').value;
+            const to = document.getElementById('payment-to').value;
+            const amount = parseFloat(document.getElementById('payment-amount').value);
+
+            if (from === to) { alert('付款人與收款人不能是同一人！'); btn.disabled=false; btn.innerText="確認標記"; return; }
+            if (amount <= 0) { alert('金額必須大於0！'); btn.disabled=false; btn.innerText="確認標記"; return; }
+
+            try {
+                await window.fbAddPayment({ id: Date.now(), date, from, to, amount });
+                closeModal('settle-modal');
+            } catch (err) { alert("標記失敗"); }
+            btn.disabled = false; btn.innerText="確認標記";
+        });
+
+        window.renderPaymentHistory = function() {
+            const tbody = document.getElementById('payment-history-body');
+            if (window.paymentsData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何還款紀錄。</td></tr>`;
+                return;
+            }
+            const sortedPayments = [...window.paymentsData].sort((a,b) => new Date(b.date) - new Date(a.date));
+            tbody.innerHTML = sortedPayments.map(p => `
+                <tr class="hover:bg-book-50/50">
+                    <td class="px-4 py-3 text-book-600">${p.date}</td>
+                    <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="text-book-900">${p.from}</span><i class="ph ph-arrow-right text-emerald-600"></i><span class="text-book-900">${p.to}</span></div></td>
+                    <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">$${p.amount.toFixed(2)}</td>
+                    <td class="px-4 py-3 text-center"><button onclick="if(confirm('確定要刪除這筆還款紀錄嗎？')) window.fbDeletePayment('${p.fbId}', ${p.id})" class="text-book-400 hover:text-red-500 p-1"><i class="ph-fill ph-trash text-lg"></i></button></td>
+                </tr>
+            `).join('');
+        }
+
+        window.viewTransactionDetail = function(fbId, localId) {
+            const idToSearch = window.isCloudConnected ? fbId : localId;
+            const record = window.recordsData.find(r => window.isCloudConnected ? r.fbId === idToSearch : r.id === idToSearch);
+            if (!record) return;
+
+            document.getElementById('tx-detail-date').innerText = record.date;
+            document.getElementById('tx-detail-title').innerText = record.title;
+            document.getElementById('tx-detail-payer').innerText = record.payer ? record.payer : '無 (純點數)';
+            document.getElementById('tx-detail-buyer-count').innerText = `${record.buyers.length} 人`;
+            document.getElementById('tx-detail-price').innerText = `$${record.price.toFixed(2)}`;
+            document.getElementById('tx-detail-points-used').innerText = record.pointsUsed > 0 ? `- ${record.pointsUsed.toFixed(2)}` : '0';
+            document.getElementById('tx-detail-points-earned').innerText = record.pointsEarned > 0 ? `+ ${record.pointsEarned.toFixed(2)}` : '0';
+            const actualCash = Math.max(0, record.price - record.pointsUsed);
+            document.getElementById('tx-detail-actual-cash').innerText = `$${actualCash.toFixed(2)}`;
+
+            const buyersListHtml = record.buyers.map(b => `
+                <div class="flex justify-between items-center bg-white p-3 border border-book-100 rounded-lg">
+                    <span class="font-bold text-book-800">${b}</span>
+                    <div class="text-right">
+                        <div class="font-mono font-bold text-book-900">$${record.perPersonCash.toFixed(2)}</div>
+                        ${record.perPersonPointsEarned > 0 ? `<div class="text-xs text-emerald-600">+ ${record.perPersonPointsEarned.toFixed(2)} Pts</div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('tx-detail-buyers-list').innerHTML = record.buyers.length > 0 ? buyersListHtml : '<p class="text-book-400 text-sm italic">無參與者</p>';
+            window.openModal('tx-detail-modal');
+        }
+
+        window.viewUserDetail = function(userName) {
+            let expense = 0, paid = 0, points = 0, settledSent = 0, settledRecv = 0;
+            let userHistory = []; 
+            
+            window.recordsData.forEach(r => {
+                const isPayer = r.payer === userName;
+                const isBuyer = r.buyers && r.buyers.includes(userName);
+                if (isPayer) paid += (r.price || 0);
+                if (isBuyer) { expense += (r.perPersonCash || 0); points += (r.perPersonPointsEarned || 0); }
+                if (isPayer || isBuyer) {
+                    userHistory.push({
+                        type: 'book', date: r.date, timestamp: new Date(r.date).getTime() + (r.price*100), 
+                        title: r.title, isPayer, isBuyer, myExpense: isBuyer ? r.perPersonCash : 0,
+                        myPaid: isPayer ? r.price : 0, myPoints: isBuyer ? r.perPersonPointsEarned : 0
+                    });
+                }
+            });
+
+            window.paymentsData.forEach(p => {
+                const isSender = p.from === userName;
+                const isReceiver = p.to === userName;
+                if (isSender) settledSent += p.amount;
+                if (isReceiver) settledRecv += p.amount;
+                if (isSender || isReceiver) {
+                    userHistory.push({
+                        type: 'payment', date: p.date, timestamp: new Date(p.date).getTime() + (p.amount*10),
+                        title: isSender ? `繳清/預繳給 ${p.to}` : `收到 ${p.from} 的還款`,
+                        isSender, isReceiver, amount: p.amount
+                    });
+                }
+            });
+
+            const balance = (paid + settledSent) - (expense + settledRecv);
+            document.getElementById('user-detail-name').innerText = userName;
+            document.getElementById('user-detail-avatar').innerText = userName.charAt(0);
+            document.getElementById('user-detail-expense').innerText = `$${expense.toFixed(2)}`;
+            document.getElementById('user-detail-paid').innerText = `$${paid.toFixed(2)}`;
+            document.getElementById('user-detail-points').innerText = `+${points.toFixed(2)}`;
+            
+            const balanceEl = document.getElementById('user-detail-balance');
+            if (balance > 0.01) balanceEl.innerHTML = `<span class="text-emerald-600">應收回(或預繳) $${balance.toFixed(2)}</span>`;
+            else if (balance < -0.01) balanceEl.innerHTML = `<span class="text-red-600">需支付 $${Math.abs(balance).toFixed(2)}</span>`;
+            else balanceEl.innerHTML = `<span class="text-book-600">已結清 ($0)</span>`;
+
+            userHistory.sort((a,b) => b.timestamp - a.timestamp);
+            const tbody = document.getElementById('user-detail-records-body');
+            
+            if (userHistory.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-book-400 italic">尚無任何帳戶異動紀錄。</td></tr>`;
+            } else {
+                tbody.innerHTML = userHistory.map(item => {
+                    let roleTags = '', expenseCol = '-', cashFlowCol = '-';
+                    if (item.type === 'book') {
+                        if (item.isPayer && item.myPaid > 0) roleTags += `<span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] mr-1">代墊</span>`;
+                        if (item.isBuyer) roleTags += `<span class="bg-book-200 text-book-800 px-1.5 py-0.5 rounded text-[10px]">分攤</span>`;
+                        if (item.myExpense > 0) expenseCol = `<span class="text-book-800 font-bold">$${item.myExpense.toFixed(2)}</span>`;
+                        if (item.myPaid > 0) cashFlowCol = `<span class="text-blue-600 font-bold">掏出 $${item.myPaid.toFixed(2)}</span>`;
+                        if (item.myPoints > 0) expenseCol += `<br><span class="text-[10px] text-emerald-600 font-normal">+${item.myPoints.toFixed(2)} 點</span>`;
+                    } else if (item.type === 'payment') {
+                        if (item.isSender) {
+                            roleTags = `<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">支付還款</span>`;
+                            cashFlowCol = `<span class="text-red-600 font-bold">掏出 $${item.amount.toFixed(2)}</span>`;
+                        } else {
+                            roleTags = `<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[10px]">收到還款</span>`;
+                            cashFlowCol = `<span class="text-emerald-600 font-bold">收回 $${item.amount.toFixed(2)}</span>`;
+                        }
+                    }
+                    return `
+                    <tr class="hover:bg-book-50/50 transition-colors">
+                        <td class="px-4 py-3"><div class="text-xs text-book-500">${item.date}</div><div class="font-bold text-book-900">${item.title}</div></td>
+                        <td class="px-4 py-3 text-center whitespace-nowrap">${roleTags}</td>
+                        <td class="px-4 py-3 text-right font-mono text-sm leading-tight">${expenseCol}</td>
+                        <td class="px-4 py-3 text-right font-mono text-sm">${cashFlowCol}</td>
+                    </tr>`;
+                }).join('');
+            }
+            window.openModal('user-detail-modal');
         }
 
     </script>
