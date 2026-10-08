@@ -526,6 +526,17 @@
             }
         }
 
+        /* 根據姓名回傳專屬顏色 class */
+        function getPayerBadgeClass(userName) {
+            switch(userName) {
+                case '心綺': return 'bg-rose-50 text-rose-700 border-rose-200';
+                case '心薇': return 'bg-blue-50 text-blue-700 border-blue-200';
+                case '欣璇': return 'bg-amber-50 text-amber-700 border-amber-200';
+                case '阿澧': return 'bg-violet-50 text-violet-700 border-violet-200';
+                default: return 'bg-slate-50 text-slate-700 border-slate-200';
+            }
+        }
+
         async function fetchDataFromCloud() {
             try {
                 const res = await fetch(`${ROOM_URL}.json`);
@@ -758,7 +769,7 @@
             for (let i = 0; i < lines.length; i++) {
                 const row = lines[i];
 
-                // 只要有前3欄 (書名, 價格, 誰有買) 就可以
+                // 只要有前3欄 (書名, 價格, 誰有買) 就可以，後面有沒有都無所謂
                 if (row.length < 3) continue;
 
                 const title = row[0] ? row[0].trim() : '';
@@ -773,15 +784,17 @@
                 let price = priceRaw === '' ? 0 : parseFloat(priceRaw);
                 if (isNaN(price) || price < 0) price = 0;
 
-                // 讀取「誰有買」(第 3 欄) 並自動切開名字
+                // 讀取「誰有買」(第 3 欄) 並自動切開名字 (支援分號、逗號、頓號)
                 let buyersStr = row[2] ? row[2].trim() : '';
                 let rawBuyers = buyersStr.split(/;|；|,|，|、/).map(b => b.trim()).filter(b => b !== '');
                 
                 let buyers = [];
+                // 只抓取系統內有設定的人名
                 rawBuyers.forEach(b => {
                     if (users.includes(b)) buyers.push(b);
                 });
 
+                // 如果真的沒有讀到半個購買人，那這筆資料就先跳過，以免系統壞掉
                 if (buyers.length === 0) continue;
 
                 // 讀取「點數」(第 4 欄)，如果沒有這欄就當作 0
@@ -792,6 +805,7 @@
                     if (isNaN(pointsEarned) || pointsEarned < 0) pointsEarned = 0;
                 }
 
+                // 將點數平分給購買者
                 const pointsByUser = {};
                 users.forEach(user => { pointsByUser[user] = 0; });
                 if (pointsEarned > 0 && buyers.length > 0) {
@@ -801,10 +815,12 @@
                     });
                 }
 
+                // 計算每人應該負擔的現金
                 const finalPayer = price > 0 ? batchPayer : null;
                 const perPersonCash = price > 0 ? price / buyers.length : 0;
                 const perPersonPointsEarned = buyers.length > 0 ? pointsEarned / buyers.length : 0;
 
+                // 組裝成系統要的格式 (其他細節全用預設值，讓您可以事後編輯)
                 const rec = {
                     id: Date.now() + importedCount,
                     date: batchDate,
@@ -1057,6 +1073,9 @@
                         const isOnlyPoints = price === 0 && pointsEarned > 0;
                         const displayTitle = highlightTitle(record.title || '', searchKeyword);
                         const buyers = getBuyers(record);
+                        
+                        // 使用新的函數取得該代墊人的顏色標籤
+                        const payerBadgeClass = getPayerBadgeClass(record.payer);
 
                         return `
                         <tr onclick="window.viewTransactionDetail('${escapeHTML(record.fbId)}', ${Number(record.id) || 0})" class="cursor-pointer hover:bg-book-50 transition-colors group border-b border-book-50">
@@ -1066,7 +1085,7 @@
                                 ${isOnlyPoints ? '<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded uppercase">純點數</span>' : ''}
                             </td>
                             <td class="px-4 py-3 whitespace-nowrap text-sm text-book-800">
-                                ${record.payer ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${escapeHTML(record.payer)}</span>` : '-'}
+                                ${record.payer ? `<span class="${payerBadgeClass} border px-2 py-0.5 rounded text-xs">${escapeHTML(record.payer)}</span>` : '-'}
                             </td>
                             <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-mono">
                                 <div class="font-bold text-book-900">$${price.toFixed(2)}</div>
